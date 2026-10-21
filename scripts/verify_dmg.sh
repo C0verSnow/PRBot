@@ -24,9 +24,15 @@ STATUS="$TEST_HOME/Library/Application Support/PRBot/status.json"
 /usr/bin/grep -q 'Token' "$STATUS"
 # Validate the installed binary reads .env from the selected workspace without shell env.
 mkdir -p "$TEST_HOME/PRBot-workspaces"
-/usr/bin/plutil -create json "$TEST_HOME/Library/Application Support/PRBot/config.json"
-/usr/bin/plutil -insert PRBOT_WORK_ROOT -string "$TEST_HOME" \
-  "$TEST_HOME/Library/Application Support/PRBot/config.json"
+python - "$TEST_HOME" <<'PYCONFIG'
+import json
+import sys
+from pathlib import Path
+root = Path(sys.argv[1])
+(root / "Library/Application Support/PRBot/config.json").write_text(
+    json.dumps({"PRBOT_WORK_ROOT": str(root)})
+)
+PYCONFIG
 chmod 600 "$TEST_HOME/Library/Application Support/PRBot/config.json"
 # A format-valid dummy token plus an invalid log level fails before any API request.
 # Checking the distinct log-level error proves .env was actually read.
