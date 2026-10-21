@@ -12,6 +12,8 @@ hdiutil attach dist/PRBot-v0.1.0-macos-arm64.dmg -nobrowse -mountpoint "$MOUNT"
 hdiutil verify dist/PRBot-v0.1.0-macos-arm64.dmg
 ditto "$MOUNT/PRBot.app" "$TEST_HOME/PRBot.app"
 BIN="$TEST_HOME/PRBot.app/Contents/MacOS/PRBot"
+[[ -f "$MOUNT/.env.example" ]]
+[[ -f "$TEST_HOME/PRBot.app/Contents/Resources/.env.example" ]]
 # Run with an empty HOME and without source PYTHONPATH or an external Python PATH.
 # An invalid Token is intentionally passed so this check never accesses a real credential.
 VERSION="$(env -i HOME="$TEST_HOME" PATH=/usr/bin:/bin "$BIN" version)"
@@ -20,6 +22,19 @@ env -i HOME="$TEST_HOME" PATH=/usr/bin:/bin TELEGRAM_BOT_TOKEN=bad "$BIN" run
 STATUS="$TEST_HOME/Library/Application Support/PRBot/status.json"
 /usr/bin/grep -q 'halted' "$STATUS"
 /usr/bin/grep -q 'Token' "$STATUS"
+# Validate the installed binary reads .env from the selected workspace without shell env.
+mkdir -p "$TEST_HOME/PRBot-workspaces"
+/usr/bin/plutil -create json "$TEST_HOME/Library/Application Support/PRBot/config.json"
+/usr/bin/plutil -insert PRBOT_WORK_ROOT -string "$TEST_HOME" \
+  "$TEST_HOME/Library/Application Support/PRBot/config.json"
+chmod 600 "$TEST_HOME/Library/Application Support/PRBot/config.json"
+echo 'TELEGRAM_BOT_TOKEN=bad' > "$TEST_HOME/PRBot-workspaces/.env"
+chmod 600 "$TEST_HOME/PRBot-workspaces/.env"
+env -i HOME="$TEST_HOME" PATH=/usr/bin:/bin "$BIN" run
+/usr/bin/grep -q 'halted' "$STATUS"
+/usr/bin/grep -q 'Token' "$STATUS"
+env -i HOME="$TEST_HOME" PATH=/usr/bin:/bin "$BIN" status > "$TEST_HOME/env-status.json"
+/usr/bin/grep -q 'PRBot-workspaces/.env' "$TEST_HOME/env-status.json"
 env -i HOME="$TEST_HOME" PATH=/usr/bin:/bin "$BIN" sdk-check > "$TEST_HOME/sdk-check.json"
 /usr/bin/grep -q '"initialized": true' "$TEST_HOME/sdk-check.json"
 codesign --verify --deep --strict "$TEST_HOME/PRBot.app"

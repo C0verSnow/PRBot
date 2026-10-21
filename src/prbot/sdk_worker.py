@@ -190,6 +190,7 @@ def run():
                 "refresh_token_expired",
                 "invalid_grant",
                 "unauthorized",
+                "login required",
             )
         ):
             kind = "authentication"

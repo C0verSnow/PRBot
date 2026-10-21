@@ -74,6 +74,8 @@ def prepare_env_directory(folder=None):
 def read_env():
     # Never search arbitrary task directories or inherit their credentials.
     path = env_path()
+    if path.is_symlink():
+        raise ConfigError(".env 不能是符号链接，请检查工作目录。")
     if not path.exists():
         return {}
     try:
