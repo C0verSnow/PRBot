@@ -64,6 +64,19 @@ def snapshot(path):
     return result
 
 
+def parent_rules(path):
+    rules = []
+    for parent in reversed(path.resolve().parents):
+        candidate = parent / "AGENTS.md"
+        if candidate.is_symlink():
+            raise DeliveryError("父目录的 AGENTS.md 是符号链接，请管理员核对后再执行。")
+        if candidate.is_file():
+            if candidate.stat().st_size > 100000:
+                raise DeliveryError("父目录的仓库约定过大，请管理员核对。")
+            rules.append({"path": str(candidate), "instructions": candidate.read_text()})
+    return rules
+
+
 class CodexAdapter:
     def __init__(self, auth):
         self.auth = auth
@@ -143,6 +156,7 @@ class CodexAdapter:
                 "or are insufficient. Keep edits strictly related to the requirement.",
                 "task": task["requirement"],
                 "associated_context": task.get("context"),
+                "applicable_parent_rules": parent_rules(path),
                 "repository_context": snapshot(path),
             },
             ensure_ascii=False,
@@ -158,6 +172,7 @@ class CodexAdapter:
                 "This is a static delivery review; CI separately runs required checks.",
                 "requirement": task["requirement"],
                 "associated_context": task.get("context"),
+                "applicable_parent_rules": parent_rules(path),
                 "diff": diff,
                 "repository_context": snapshot(path),
             },

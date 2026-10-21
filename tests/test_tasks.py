@@ -438,3 +438,15 @@ async def test_independent_review_receives_associated_issue_context(tmp_path):
     )
     prompt = json.loads(adapter.invoke.call_args.args[1])
     assert prompt["associated_context"] == context
+
+
+def test_workspace_parent_rules_are_supplied_in_order(tmp_path):
+    from prbot.codex_adapter import parent_rules
+
+    parent = tmp_path / "selected"
+    child = parent / "PRBot-workspaces" / "task"
+    child.mkdir(parents=True)
+    (parent / "AGENTS.md").write_text("No local compilation. Use four-quadrant tasklist.")
+    rules = parent_rules(child)
+    assert rules[-1]["instructions"] == "No local compilation. Use four-quadrant tasklist."
+    assert rules[-1]["path"] == str(parent / "AGENTS.md")
