@@ -127,7 +127,11 @@ def apply_edits(root, proposal):
 async def inspect_diff(path, task, secrets=()):
     await git(path, "add", "--all")
     await git(path, "diff", "--cached", "--check")
-    names = (await git(path, "diff", "--cached", "--name-only")).splitlines()
+    names = [
+        name
+        for name in (await git(path, "diff", "--cached", "--name-only", "-z")).split("\0")
+        if name
+    ]
     if not names:
         raise DeliveryError("没有实际代码变更。")
     for name in names:
@@ -149,8 +153,10 @@ async def inspect_diff(path, task, secrets=()):
         body = log.read_text() if log.is_file() else ""
         headings = ("## 想做：", "## 做完：", "## 没做：", "## 在做：")
         records = [line.strip() for line in body.splitlines() if line.strip().startswith("- ")]
-        if not all(heading in body for heading in headings) or any(
-            not re.search(r"\b[0-9]{9,11}\b", line) for line in records
+        if (
+            not records
+            or not all(heading in body for heading in headings)
+            or any(not re.search(r"\b[0-9]{9,11}\b", line) for line in records)
         ):
             raise DeliveryError("tasklist.md 不符合仓库四象限和每条记录带 Unix 时间戳的约定。")
     requirement = task["requirement"]

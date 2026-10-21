@@ -87,6 +87,11 @@ class GitHub:
                 for c in reversed(checks["check_runs"])
             }
         )
+        runs = await self.request(
+            "GET", f"/repos/{repo}/actions/runs", params={"head_sha": sha, "per_page": 100}
+        )
+        if any(run["status"] != "completed" for run in runs.get("workflow_runs", [])):
+            return False
         if any(
             values.get(k)
             in {

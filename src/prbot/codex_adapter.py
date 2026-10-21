@@ -158,7 +158,9 @@ class CodexAdapter:
                 "or are insufficient. Keep edits strictly related to the requirement.",
                 "task": task["requirement"],
                 "associated_context": task.get("context"),
-                "applicable_parent_rules": task.get("parent_rules", parent_rules(path)),
+                "applicable_parent_rules": (
+                    task["parent_rules"] if "parent_rules" in task else parent_rules(path)
+                ),
                 "current_unix_time": int(time.time()),
                 "repository_context": snapshot(path),
             },
@@ -175,7 +177,9 @@ class CodexAdapter:
                 "This is a static delivery review; CI separately runs required checks.",
                 "requirement": task["requirement"],
                 "associated_context": task.get("context"),
-                "applicable_parent_rules": task.get("parent_rules", parent_rules(path)),
+                "applicable_parent_rules": (
+                    task["parent_rules"] if "parent_rules" in task else parent_rules(path)
+                ),
                 "current_unix_time": int(time.time()),
                 "diff": diff,
                 "repository_context": snapshot(path),

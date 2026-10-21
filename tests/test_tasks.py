@@ -265,7 +265,9 @@ async def test_issue_close_failure_checked():
 
 async def test_required_checks_fail_closed():
     gh = GitHub("test")
-    gh.request = AsyncMock(side_effect=[{"check_runs": []}, {"statuses": []}])
+    gh.request = AsyncMock(
+        side_effect=[{"check_runs": []}, {"statuses": []}, {"workflow_runs": []}]
+    )
     try:
         assert not await gh.checks("o/r", "sha", ("test", "dmg"))
     finally:
@@ -450,3 +452,61 @@ def test_workspace_parent_rules_are_supplied_in_order(tmp_path):
     rules = parent_rules(child)
     assert rules[-1]["instructions"] == "No local compilation. Use four-quadrant tasklist."
     assert rules[-1]["path"] == str(parent / "AGENTS.md")
+
+
+@pytest.mark.parametrize("conclusion", ["cancelled", "failure", "success"])
+async def test_pending_successor_workflow_prevents_early_delivery_or_failure(conclusion):
+    gh = GitHub("test")
+    gh.request = AsyncMock(
+        side_effect=[
+            {"check_runs": [{"name": "test", "status": "completed", "conclusion": conclusion}]},
+            {"statuses": []},
+            {"workflow_runs": [{"status": "queued"}]},
+        ]
+    )
+    try:
+        assert not await gh.checks("o/r", "sha", ("test",))
+    finally:
+        await gh.close()
+
+
+async def test_terminal_check_failure_after_all_runs_finish():
+    gh = GitHub("test")
+    gh.request = AsyncMock(
+        side_effect=[
+            {"check_runs": [{"name": "test", "status": "completed", "conclusion": "failure"}]},
+            {"statuses": []},
+            {"workflow_runs": [{"status": "completed"}]},
+        ]
+    )
+    try:
+        with pytest.raises(DeliveryError):
+            await gh.checks("o/r", "sha", ("test",))
+    finally:
+        await gh.close()
+
+
+async def test_task_records_checked_independently_and_utf8_names_preserved(tmp_path, monkeypatch):
+    from prbot.workspace import inspect_diff
+
+    async def fake_git(path, *args, **kwargs):
+        if "--name-only" in args:
+            assert "-z" in args
+            return "test.md\0README.md\0tasklist.md\0使用手册.md\0"
+        return "diff" if "--no-ext-diff" in args else ""
+
+    monkeypatch.setattr("prbot.workspace.git", fake_git)
+    (tmp_path / "test.md").write_text("test done")
+    (tmp_path / "tasklist.md").write_text("# Tasklist\n- created file without timestamp")
+    task = {
+        "requirement": "create test.md with test done",
+        "parent_rules": [{"instructions": "tasklist 为4象限，每一条记录带 Unix Timestamp"}],
+    }
+    with pytest.raises(DeliveryError, match="四象限"):
+        await inspect_diff(tmp_path, task)
+    (tmp_path / "tasklist.md").write_text(
+        "# 本文档为4象限的任务清单，全文书写大白话\n"
+        "## 想做：\n## 做完：\n- [1792550204] 已创建测试文件。\n## 没做：\n## 在做：\n"
+    )
+    _, names = await inspect_diff(tmp_path, task)
+    assert "使用手册.md" in names
