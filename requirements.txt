@@ -12,3 +12,6 @@ jaraco.context==6.0.1
 jaraco.functools==4.3.0
 more-itertools==10.8.0
 typing_extensions==4.15.0
+
+openai-codex==0.163.0
+openai-codex-cli-bin==0.163.0

@@ -47,7 +47,11 @@ def read_settings():
 def save_settings(values):
     path = data_dir() / "config.json"
     # Only settings, never copy environment variables or a Token into this file.
-    allowed = {k: v for k, v in values.items() if k != "TELEGRAM_BOT_TOKEN"}
+    allowed = {
+        k: v
+        for k, v in values.items()
+        if k not in {"TELEGRAM_BOT_TOKEN", "GITHUB_TOKEN", "OPENAI_API_KEY"}
+    }
     old = read_settings()
     old.update(allowed)
     tmp = path.with_suffix(".tmp")

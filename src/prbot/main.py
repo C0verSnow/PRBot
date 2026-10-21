@@ -82,12 +82,39 @@ def main():
             "autostart",
             "configure",
             "version",
+            "sdk-worker",
+            "sdk-check",
+            "import-codex",
         ],
     )
     parser.add_argument("value", nargs="?", choices=["on", "off"])
     args = parser.parse_args()
     try:
-        if args.command == "version":
+        if args.command == "sdk-worker":
+            from prbot.sdk_worker import run as sdk_run
+
+            sdk_run()
+        elif args.command == "sdk-check":
+            from codex_cli_bin import bundled_codex_path
+            from openai_codex import Codex, CodexConfig
+
+            with Codex(
+                CodexConfig(env={"CODEX_HOME": str(service.data_dir() / "sdk-check")})
+            ) as sdk:
+                print(
+                    json.dumps(
+                        {
+                            "runtime": str(bundled_codex_path()),
+                            "initialized": sdk.metadata is not None,
+                        }
+                    )
+                )
+        elif args.command == "import-codex":
+            from prbot.execution_setup import import_codex_login
+
+            import_codex_login()
+            print("现有 Codex 登录已导入钥匙串，请重启服务。")
+        elif args.command == "version":
             print(__version__)
         elif args.command == "ui":
             from prbot.ui import show

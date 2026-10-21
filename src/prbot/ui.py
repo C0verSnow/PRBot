@@ -32,7 +32,7 @@ def tell(message):
 def show():
     while True:
         action = applescript("""
-set options to {"配置 Token", "启动服务", "停止服务", "重启服务", ¬
+set options to {"配置任务", "导入 Codex 登录", "配置 Token", "启动服务", "停止服务", "重启服务", ¬
     "开启登录自启动", "关闭登录自启动", "查看状态"}
 set choice to choose from list options with title "PRBot v0.1.0" ¬
     with prompt "首次使用请先配置 Token。关闭此界面不影响后台服务。"
@@ -42,7 +42,36 @@ return item 1 of choice
         if not action:
             return
         try:
-            if action == "配置 Token":
+            if action == "配置任务":
+                from prbot.execution_setup import configure_tasks
+
+                values = []
+                for prompt, hidden in [
+                    (
+                        "GitHub Token（代码/PR/Issue 写权限，Checks/Actions 读权限）",
+                        True,
+                    ),
+                    ("允许的 Telegram 用户 ID（逗号分隔）", False),
+                    ("允许的仓库 owner/repo（逗号分隔）", False),
+                ]:
+                    label = json.dumps(prompt, ensure_ascii=False)
+                    value = applescript(
+                        f"text returned of (display dialog {label} "
+                        'default answer "" with title "PRBot"'
+                        + (" with hidden answer)" if hidden else ")")
+                    )
+                    if value is None:
+                        break
+                    values.append(value)
+                if len(values) == 3:
+                    configure_tasks(*values)
+                    tell("任务配置已保存，已导入当前 Codex 登录。重启服务后发送 /FinishIssue。")
+            elif action == "导入 Codex 登录":
+                from prbot.execution_setup import import_codex_login
+
+                import_codex_login()
+                tell("Codex 登录已导入钥匙串；登录过期后请重新导入，并重启服务。")
+            elif action == "配置 Token":
                 value = applescript("""
 text returned of (display dialog "请输入 BotFather 提供的 Token（存入 macOS 钥匙串）。" ¬
     default answer "" with hidden answer with title "PRBot")

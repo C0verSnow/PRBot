@@ -20,5 +20,7 @@ env -i HOME="$TEST_HOME" PATH=/usr/bin:/bin TELEGRAM_BOT_TOKEN=bad "$BIN" run
 STATUS="$TEST_HOME/Library/Application Support/PRBot/status.json"
 /usr/bin/grep -q 'halted' "$STATUS"
 /usr/bin/grep -q 'Token' "$STATUS"
+env -i HOME="$TEST_HOME" PATH=/usr/bin:/bin "$BIN" sdk-check > "$TEST_HOME/sdk-check.json"
+/usr/bin/grep -q '"initialized": true' "$TEST_HOME/sdk-check.json"
 codesign --verify --deep --strict "$TEST_HOME/PRBot.app"
 echo 'DMG mount/copy + embedded runtime + invalid configuration halt: passed'
