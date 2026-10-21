@@ -7,7 +7,7 @@ from telegram.error import Conflict, Forbidden, InvalidToken, NetworkError
 from prbot.command_router import CommandRouter
 from prbot.config import Config
 from prbot.state import State, instance_lock
-from prbot.telegram_client import Receiver, ServiceHalted, backoff, run
+from prbot.telegram_client import Receiver, ServiceHalted, backoff, poll_until_stopped, run
 
 
 @pytest.fixture
@@ -130,3 +130,22 @@ def test_single_instance():
 def test_backoff_is_bounded():
     assert 0 < backoff(1) <= 2
     assert 45 <= backoff(100) <= 60
+
+
+async def test_stop_interrupts_long_poll():
+    stop = asyncio.Event()
+    entered = asyncio.Event()
+    cancelled = asyncio.Event()
+
+    async def blocked_poll(**kwargs):
+        entered.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            cancelled.set()
+
+    task = asyncio.create_task(poll_until_stopped(Mock(get_updates=blocked_poll), stop))
+    await asyncio.wait_for(entered.wait(), timeout=1)
+    stop.set()
+    assert await asyncio.wait_for(task, timeout=1) == ()
+    assert cancelled.is_set()

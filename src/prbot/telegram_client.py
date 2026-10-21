@@ -34,6 +34,20 @@ async def pause(stop, seconds):
         pass
 
 
+async def poll_until_stopped(bot, stop, **kwargs):
+    # Interrupt a long poll immediately on SIGTERM instead of waiting past launchd's grace.
+    poll = asyncio.create_task(bot.get_updates(**kwargs))
+    stopping = asyncio.create_task(stop.wait())
+    try:
+        done, _ = await asyncio.wait({poll, stopping}, return_when=asyncio.FIRST_COMPLETED)
+        return await poll if poll in done else ()
+    finally:
+        for task in (poll, stopping):
+            if not task.done():
+                task.cancel()
+        await asyncio.gather(poll, stopping, return_exceptions=True)
+
+
 def retry_seconds(error):
     value = error.retry_after
     return value.total_seconds() if isinstance(value, timedelta) else value
@@ -100,7 +114,9 @@ async def run(config, state, stop, report):
                     receiver = Receiver(bot, state, CommandRouter(bot.username))
                     log.info("Token API 校验成功，开始长轮询")
                 report("running", "Telegram 已连接，正在监听")
-                updates = await bot.get_updates(
+                updates = await poll_until_stopped(
+                    bot,
+                    stop,
                     offset=state.offset,
                     timeout=config.poll_timeout,
                     read_timeout=config.poll_timeout + 10,
