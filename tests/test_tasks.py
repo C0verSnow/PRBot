@@ -163,14 +163,19 @@ def task(store, update):
         )
 
 
-async def test_sdk_failure_and_timeout(store, settings, task, monkeypatch, tmp_path):
+@pytest.mark.parametrize(
+    "failure,expected", [(TimeoutError(), "超时"), (DeliveryError("SDK rejected"), "SDK rejected")]
+)
+async def test_sdk_failure_and_timeout(
+    store, settings, task, monkeypatch, tmp_path, failure, expected
+):
     monkeypatch.setattr("prbot.executor.prepare", AsyncMock(return_value=(tmp_path, "base")))
     gh = Mock(repository=AsyncMock(return_value={"default_branch": "main"}))
-    sdk = Mock(auth="secret", execute=AsyncMock(side_effect=TimeoutError()))
+    sdk = Mock(auth="secret", execute=AsyncMock(side_effect=failure))
     executor = Executor(store, settings, gh, sdk, "token")
     await executor.execute(task)
     assert store.get(task["id"])["status"] == "failed"
-    assert "超时" in store.get(task["id"])["error"]
+    assert expected in store.get(task["id"])["error"]
     gh.pull_request.assert_not_called()
 
 
@@ -183,7 +188,11 @@ async def test_restart_marks_interrupted(store, settings, task):
     sdk.execute.assert_not_called()
 
 
-async def test_worker_concurrency_and_stop(store, settings, task):
+async def test_worker_concurrency_and_stop(store, settings, task, update):
+    with store.db:
+        second = store.submit(
+            11, "123:123:0", "owner/repo", "create another file", update().message
+        )
     stop = asyncio.Event()
     executor = Executor(store, settings, Mock(), Mock(), "token")
     entered = asyncio.Event()
@@ -202,6 +211,7 @@ async def test_worker_concurrency_and_stop(store, settings, task):
     stop.set()
     await asyncio.wait_for(running, 2)
     assert store.get(task["id"])["status"] == "interrupted"
+    assert store.get(second["id"])["status"] == "queued"
 
 
 async def test_outbox_separate_from_execution(store, task):
