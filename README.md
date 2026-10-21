@@ -31,3 +31,9 @@ Token 不进入日志或 LaunchAgent。普通消息和发给其他 Bot 的命令
 禁止在本地执行编译、打包或可能触发编译的验证。本仓库在 feature 分支 push、PR 或手动触发 Actions 时，远端安装依赖、静态检查、pytest、构建 DMG，并检查挂载复制后的独立运行时。不要在本地运行 `build_dmg.sh` 或 `verify_dmg.sh`。
 
 构建链参考 [PyInstaller](https://pyinstaller.org/en/stable/spec-files.html)；Telegram 使用 [Bot API 长轮询](https://core.telegram.org/bots/api#getupdates) 和 [python-telegram-bot](https://docs.python-telegram-bot.org/en/stable/telegram.bot.html)。
+
+## test.md 文件记录
+
+日期基准 Unix 时间戳：`1792454400`（2026-10-20 00:00:00 UTC，非精确操作时间）。
+
+仓库根目录新增 [test.md](test.md)，内容为 `test done`，末尾保留一个换行。相关说明见 [使用手册](使用手册.md)，任务状态见 [tasklist.md](tasklist.md)。本次未执行本地编译或测试；验证使用现有远端 CI，结果待对应提交的 Actions 运行确认，不合并 PR。
