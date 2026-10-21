@@ -1,6 +1,7 @@
 """Remote CI only: exercise the packaged WebKit UI and export a real window snapshot."""
 
 import json
+import os
 
 
 def schedule_check(web, output):
@@ -9,6 +10,7 @@ def schedule_check(web, output):
     from PyObjCTools import AppHelper
 
     finished = False
+    interaction_error = None
 
     def finish(ok, detail):
         nonlocal finished
@@ -16,7 +18,9 @@ def schedule_check(web, output):
             return
         finished = True
         output.with_suffix(".json").write_text(json.dumps({"ok": ok, "detail": detail}))
-        AppHelper.stopEventLoop()
+        # AppHelper.stopEventLoop may terminate NSApplication with exit status 0.
+        # This isolated CI subprocess must propagate its actual verdict to Actions.
+        os._exit(0 if ok else 2)
 
     def snapshot(image, error):
         if error or image is None:
@@ -25,14 +29,19 @@ def schedule_check(web, output):
         bitmap = AppKit.NSBitmapImageRep.imageRepWithData_(image.TIFFRepresentation())
         data = bitmap.representationUsingType_properties_(AppKit.NSBitmapImageFileTypePNG, {})
         ok = bool(data.writeToFile_atomically_(str(output), True))
-        finish(ok, "React DOM, navigation, settings, native bridge and snapshot checked")
+        finish(
+            ok and interaction_error is None,
+            interaction_error
+            or "React DOM, navigation, settings, native bridge and snapshot checked",
+        )
 
     def checked(result, error):
+        nonlocal interaction_error
         if finished:
             return
-        if error or result == "failed":
-            finish(False, "UI interaction check failed")
-        elif result == "ok":
+        if error or (isinstance(result, str) and result.startswith("failed:")):
+            interaction_error = result if not error else "JavaScript evaluation failed"
+        if interaction_error or result == "ok":
             web.takeSnapshotWithConfiguration_completionHandler_(
                 WebKit.WKSnapshotConfiguration.alloc().init(), snapshot
             )
@@ -60,11 +69,11 @@ def schedule_check(web, output):
         web.evaluateJavaScript_completionHandler_(
             """
 (async () => {
-  const assert = value => { if (!value) throw new Error('UI assertion failed'); };
+  const assert = (value, label) => { if (!value) throw new Error(label || 'UI assertion failed'); };
   const tick = () => new Promise(resolve => setTimeout(resolve, 40));
-  assert(getComputedStyle(document.querySelector('#root > div')).display === 'flex');
-  assert(document.querySelector('aside').getBoundingClientRect().width === 252);
-  assert(getComputedStyle(document.querySelector('#composer')).borderRadius === '17px');
+  assert(getComputedStyle(document.querySelector('#root > div')).display === 'flex', 'Tailwind root flex layout missing');
+  assert(document.querySelector('aside').getBoundingClientRect().width === 252, 'Sidebar width is not 252px');
+  assert(getComputedStyle(document.querySelector('#composer')).borderRadius === '17px', 'Composer border radius missing');
   assert(document.querySelector('#greeting').textContent === 'What shall we think through?');
   assert(document.querySelectorAll('[data-view]').length === 6);
   assert(document.querySelectorAll('.composer button').length === 1);
@@ -95,7 +104,7 @@ def schedule_check(web, output):
   input.dispatchEvent(new Event('input', {bubbles:true}));
   await tick();
   window.__uiCheckResult = 'ok';
-})().catch(() => { window.__uiCheckResult = 'failed'; });
+})().catch(error => { window.__uiCheckResult = 'failed:' + error.message; });
 true;
 """,
             lambda result, error: poll_result(),
