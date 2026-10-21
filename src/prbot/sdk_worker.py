@@ -4,6 +4,7 @@ import json
 import os
 import sys
 import tempfile
+from contextlib import contextmanager
 from pathlib import Path
 
 
@@ -41,6 +42,19 @@ def runtime_profile(workspace, auth_home, runtime):
     )
 
 
+@contextmanager
+def private_home(request):
+    if request.get("private_home"):
+        # Created by the controller, which also cleans it after forced termination.
+        path = Path(request["private_home"])
+        if path.is_symlink() or not path.is_dir() or path.stat().st_uid != os.getuid():
+            raise RuntimeError("Invalid private runtime directory")
+        yield str(path)
+    else:
+        with tempfile.TemporaryDirectory(prefix="prbot-sdk-") as directory:
+            yield directory
+
+
 def run():
     from codex_cli_bin import bundled_codex_path
     from openai_codex import ApprovalMode, Codex, CodexConfig, Sandbox
@@ -48,7 +62,7 @@ def run():
     request = json.load(sys.stdin)
     workspace = Path(request["path"]).resolve()
     runtime = str(bundled_codex_path().resolve())
-    with tempfile.TemporaryDirectory(prefix="prbot-sdk-") as private:
+    with private_home(request) as private:
         auth_home = Path(private).resolve()
         os.chmod(private, 0o700)
         auth = auth_home / "auth.json"

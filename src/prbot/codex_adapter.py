@@ -9,6 +9,7 @@ import json
 import os
 import signal
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -83,6 +84,11 @@ class CodexAdapter:
         self.auth = auth
 
     async def invoke(self, path, prompt, schema, timeout):
+        # The parent owns cleanup even when cancellation must SIGKILL the worker.
+        with tempfile.TemporaryDirectory(prefix="prbot-sdk-controller-") as private:
+            return await self._invoke(path, prompt, schema, timeout, private)
+
+    async def _invoke(self, path, prompt, schema, timeout, private):
         original_auth = self.auth
         command = (
             [sys.executable, "sdk-worker"]
@@ -107,6 +113,7 @@ class CodexAdapter:
                     json.dumps(
                         {
                             "auth": original_auth,
+                            "private_home": private,
                             "path": str(path),
                             "prompt": prompt,
                             "schema": schema,

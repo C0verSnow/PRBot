@@ -510,3 +510,29 @@ async def test_task_records_checked_independently_and_utf8_names_preserved(tmp_p
     )
     _, names = await inspect_diff(tmp_path, task)
     assert "使用手册.md" in names
+
+
+async def test_sdk_timeout_removes_private_credential_directory(tmp_path, monkeypatch):
+    from pathlib import Path
+
+    from prbot.codex_adapter import CodexAdapter
+
+    captured = []
+
+    async def communicate(payload):
+        private = Path(json.loads(payload)["private_home"])
+        assert private.is_dir()
+        (private / "auth.json").write_text("test credential")
+        captured.append(private)
+        raise TimeoutError
+
+    process = Mock(pid=123456, returncode=None, communicate=communicate, wait=AsyncMock())
+    monkeypatch.setattr(
+        "prbot.codex_adapter.asyncio.create_subprocess_exec", AsyncMock(return_value=process)
+    )
+    kill = Mock()
+    monkeypatch.setattr("prbot.codex_adapter.os.killpg", kill)
+    with pytest.raises(TimeoutError):
+        await CodexAdapter("{}").invoke(tmp_path, "request", {}, 1)
+    assert captured and not captured[0].exists()
+    kill.assert_called_once()
