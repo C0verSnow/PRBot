@@ -81,6 +81,7 @@ def main():
             "status",
             "autostart",
             "configure",
+            "configure-tasks",
             "version",
             "sdk-worker",
             "sdk-check",
@@ -101,6 +102,16 @@ def main():
             path.mkdir(mode=0o700, exist_ok=True)
             result = asyncio.run(CodexAdapter("{}").invoke(path, "__prbot_runtime_check__", {}, 30))
             print(json.dumps(result))
+        elif args.command == "configure-tasks":
+            from prbot.execution_setup import configure_tasks
+
+            values = json.load(sys.stdin)
+            if values.get("telegram_token"):
+                token = validate_token(values["telegram_token"])
+                asyncio.run(validate_api(token))
+                keychain_token(token)
+            configure_tasks(values["github_token"], values["users"], values["repos"])
+            print("任务凭据已保存到钥匙串，允许范围已保存；请重启服务。")
         elif args.command == "import-codex":
             from prbot.execution_setup import import_codex_login
 

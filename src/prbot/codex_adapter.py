@@ -69,6 +69,7 @@ class CodexAdapter:
         self.auth = auth
 
     async def invoke(self, path, prompt, schema, timeout):
+        original_auth = self.auth
         command = (
             [sys.executable, "sdk-worker"]
             if getattr(sys, "frozen", False)
@@ -91,7 +92,7 @@ class CodexAdapter:
                 out, diagnostic = await proc.communicate(
                     json.dumps(
                         {
-                            "auth": self.auth,
+                            "auth": original_auth,
                             "path": str(path),
                             "prompt": prompt,
                             "schema": schema,
@@ -106,7 +107,7 @@ class CodexAdapter:
             if prompt == "__prbot_runtime_check__":
                 return response
             updated = response["auth"]
-            if updated != self.auth:
+            if updated != original_auth and self.auth == original_auth:
                 from prbot.task_config import credential
 
                 credential("codex-login", updated)
