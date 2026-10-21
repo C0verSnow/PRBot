@@ -32,18 +32,28 @@ def tell(message):
 def show():
     while True:
         action = applescript("""
-set options to {"选择工作路径", "配置任务", "导入 Codex 登录", "配置 Token", ¬
+set options to {"打开配置目录", "选择工作路径", "配置任务", "导入 Codex 登录", "配置 Token", ¬
     "启动服务", "停止服务", "重启服务", ¬
     "开启登录自启动", "关闭登录自启动", "查看状态"}
 set choice to choose from list options with title "PRBot v0.1.0" ¬
-    with prompt "首次使用请先配置 Token。关闭此界面不影响后台服务。"
+    with prompt "首次使用先选择工作路径，再打开配置目录填写 .env。关闭界面不影响服务。"
 if choice is false then return ""
 return item 1 of choice
 """)
         if not action:
             return
         try:
-            if action == "选择工作路径":
+            if action == "打开配置目录":
+                from prbot.config import prepare_env_directory
+
+                path = prepare_env_directory()
+                subprocess.run(["/usr/bin/open", "-R", str(path)], check=True)
+                tell(
+                    f"请在这里填写配置：{path}\n"
+                    "填写 Telegram Token；仓库任务还需 GitHub Token、用户 ID 和仓库范围。\n"
+                    "Codex 登录请使用菜单导入。保存 .env 后重启服务。"
+                )
+            elif action == "选择工作路径":
                 from prbot.task_config import select_work_root
 
                 path = applescript(
@@ -54,7 +64,8 @@ return item 1 of choice
                     selected = select_work_root(path)
                     tell(
                         f"工作路径已设为：{selected}\n"
-                        "任务保存在其中的 PRBot-workspaces 文件夹。\n"
+                        "已生成 PRBot-workspaces 文件夹及 .env.example、.env。\n"
+                        f"请填写：{selected}/PRBot-workspaces/.env\n"
                         "重启服务后对新任务生效，已有任务不搬动。"
                     )
             elif action == "配置任务":

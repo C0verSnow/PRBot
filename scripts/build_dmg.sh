@@ -14,7 +14,7 @@ mkdir -p dist/dmg-content
 # ditto preserves the bundle symlinks and embedded runtime.
 ditto "$APP" dist/dmg-content/PRBot.app
 ln -s /Applications dist/dmg-content/Applications
-cp 使用手册.md dist/dmg-content/
+cp 使用手册.md .env.example dist/dmg-content/
 cat > dist/dmg-content/测试版说明.txt <<'NOTICE'
 PRBot v0.1.0 开发测试版：Apple Silicon / macOS 14+
 仅 ad hoc 签名，没有 Developer ID 签名、没有 Apple 公证。

@@ -5,6 +5,7 @@ from telegram import Update
 @pytest.fixture(autouse=True)
 def isolated_home(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setattr("prbot.config.env_path", lambda: tmp_path / ".env")
     for key in ("TELEGRAM_BOT_TOKEN", "PRBOT_LOG_LEVEL", "PRBOT_POLL_TIMEOUT", "PRBOT_AUTOSTART"):
         monkeypatch.delenv(key, raising=False)
 

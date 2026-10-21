@@ -96,7 +96,10 @@ def status():
     workspace = (
         str(Path(selected) / "PRBot-workspaces") if selected else str(data_dir() / "workspaces")
     )
+    from prbot.config import env_path
+
     return {
+        "env_file": str(env_path()),
         "workspace_root": workspace,
         "agent_loaded": loaded,
         "autostart": agent_path().exists(),

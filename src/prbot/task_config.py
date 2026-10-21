@@ -4,7 +4,7 @@ import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from prbot.config import ConfigError, read_settings
+from prbot.config import ConfigError, environment_value, read_settings
 from prbot.tasks import repository_url
 
 SECRET_KEYS = {"GITHUB_TOKEN", "OPENAI_API_KEY", "TELEGRAM_BOT_TOKEN"}
@@ -18,7 +18,7 @@ def credential(name, value=None):
         if value is not None:
             backend.set_password("org.prbot.execution", name, value)
             return None
-        return os.environ.get(name) or backend.get_password("org.prbot.execution", name)
+        return environment_value(name) or backend.get_password("org.prbot.execution", name)
     except Exception:
         raise ConfigError("执行凭据不可读取，请解锁钥匙串并重新配置。") from None
 
@@ -45,7 +45,7 @@ class TaskConfig:
         settings = read_settings()
 
         def get(key, default):
-            return os.environ.get(key, settings.get(key, default))
+            return environment_value(key, settings.get(key, default))
 
         try:
             users = frozenset(int(v) for v in str(get("PRBOT_ALLOWED_USERS", "")).split(",") if v)
@@ -96,8 +96,9 @@ def validate_work_root(value):
 
 
 def select_work_root(value):
-    from prbot.config import save_settings
+    from prbot.config import prepare_env_directory, save_settings
 
     path = validate_work_root(value)
+    prepare_env_directory(Path(path) / "PRBot-workspaces")
     save_settings({"PRBOT_WORK_ROOT": path})
     return path

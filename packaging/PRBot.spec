@@ -10,7 +10,8 @@ analysis = Analysis(
     [str(root / 'packaging/entry.py')],
     pathex=[str(root / 'src')],
     binaries=sdk_binaries + cli_binaries,
-    datas=collect_data_files('certifi') + sdk_data + cli_data,
+    datas=collect_data_files('certifi') + sdk_data + cli_data
+        + [(str(root / '.env.example'), '.')],
     hiddenimports=collect_submodules('keyring.backends.macOS') + sdk_imports + cli_imports,
     hookspath=[], runtime_hooks=[], excludes=['tkinter', 'pytest'],
     noarchive=False,
