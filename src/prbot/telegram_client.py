@@ -126,7 +126,7 @@ async def run(config, state, stop, report):
                     initialized = True
                     receiver = Receiver(bot, state, CommandRouter(bot.username, conversations))
                     if settings.enabled:
-                        from prbot.codex_adapter import CodexAdapter
+                        from prbot.codex_adapter import CodexAdapter, SDKFailure
                         from prbot.execution_setup import execution_credentials
                         from prbot.executor import Executor, send_outbox
                         from prbot.github import GitHub
@@ -139,10 +139,20 @@ async def run(config, state, stop, report):
 
                         try:
                             await codex.check_auth()
-                        except (DeliveryError, TimeoutError):
+                        except SDKFailure as error:
+                            await github.close()
+                            log.error(
+                                "Codex 启动检查失败 code=%s stage=%s type=%s",
+                                error.code,
+                                error.stage,
+                                error.exception_type,
+                            )
+                            raise ServiceHalted(str(error)) from None
+                        except (DeliveryError, TimeoutError) as error:
                             await github.close()
                             raise ServiceHalted(
-                                "Codex 启动检查失败，请重新导入登录并检查运行时。"
+                                f"Codex 启动检查失败（{type(error).__name__}），"
+                                "请检查网络、登录及运行时。"
                             ) from None
                         executor = Executor(store, settings, github, codex, token)
                         background = [
