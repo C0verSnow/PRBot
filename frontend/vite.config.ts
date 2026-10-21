@@ -11,7 +11,7 @@ export default defineConfig({
       handler(_options, bundle) {
         const html = bundle['index.html'];
         if (html?.type === 'asset') {
-          html.source = String(html.source).replace(/<script type="module" crossorigin/g, '<script defer');
+          html.source = String(html.source).replace(/<script type="module"/g, '<script defer').replace(/ crossorigin/g, '');
         }
       },
     },
