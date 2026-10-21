@@ -21,6 +21,8 @@ export default defineConfig({
   build: {
     target: 'safari17',
     cssTarget: 'safari17',
+    // IIFE output must emit external CSS; inline style injection is blocked by CSP.
+    cssCodeSplit: false,
     // A classic local bundle avoids file:// module/CORS restrictions in WebKit.
     modulePreload: false,
     rolldownOptions: {
