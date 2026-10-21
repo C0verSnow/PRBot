@@ -350,3 +350,34 @@ async def test_sandboxed_sdk_runtime_initializes(tmp_path):
 
     result = await CodexAdapter("{}").invoke(tmp_path, "__prbot_runtime_check__", {}, 30)
     assert result == {"initialized": True}
+
+
+async def test_sandbox_restricts_host_reads_and_execution(tmp_path):
+    from pathlib import Path
+
+    from prbot.sdk_worker import runtime_profile
+
+    work = tmp_path / "work"
+    private = tmp_path / "private"
+    work.mkdir()
+    private.mkdir()
+    (work / "allowed.txt").write_text("allowed")
+    (tmp_path / "unrelated-credential").write_text("private")
+    profile = runtime_profile(work.resolve(), private.resolve(), "/bin/cat")
+
+    async def command(*args):
+        proc = await asyncio.create_subprocess_exec(
+            "/usr/bin/sandbox-exec",
+            "-p",
+            profile,
+            *args,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        out, _ = await proc.communicate()
+        return proc.returncode, out
+
+    assert await command("/bin/cat", str(work / "allowed.txt")) == (0, b"allowed")
+    assert (await command("/bin/cat", str(tmp_path / "unrelated-credential")))[0] != 0
+    assert (await command("/bin/sh", "-c", "echo escape"))[0] != 0
+    assert Path("/usr/bin/sandbox-exec").exists()

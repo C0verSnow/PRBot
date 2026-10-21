@@ -122,6 +122,15 @@ class CodexAdapter:
                 pass
             await proc.wait()
 
+    async def check_auth(self):
+        from prbot.paths import data_dir
+
+        path = data_dir() / "sdk-startup"
+        path.mkdir(mode=0o700, exist_ok=True)
+        result = await self.invoke(path, "__prbot_account_check__", {}, 30)
+        if not result.get("authenticated"):
+            raise DeliveryError("Codex 登录不可用，请重新登录、导入钥匙串并重启服务。")
+
     async def execute(self, path, task, timeout):
         prompt = json.dumps(
             {

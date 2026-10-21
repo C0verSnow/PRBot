@@ -7,6 +7,36 @@ import tempfile
 from pathlib import Path
 
 
+def runtime_profile(workspace, auth_home, runtime):
+    return "\n".join(
+        [
+            "(version 1)",
+            "(deny default)",
+            "(allow process-fork)",
+            "(allow process-info* (target same-sandbox))",
+            '(allow file-map-executable (subpath "/System") (subpath "/usr/lib") '
+            f"(literal {json.dumps(runtime)}))",
+            '(allow file-read* (literal "/") (subpath "/private/etc") '
+            '(subpath "/private/var/db/timezone") (literal "/dev/random"))',
+            '(allow file-read-data file-write-data (subpath "/dev/fd"))',
+            '(allow system-mac-syscall (mac-policy-name "vnguard"))',
+            '(allow system-mac-syscall (require-all (mac-policy-name "Sandbox") '
+            "(mac-syscall-number 67)))",
+            f"(allow process-exec (literal {json.dumps(runtime)}))",
+            "(allow sysctl-read)",
+            "(allow signal (target self))",
+            "(allow mach-lookup)",
+            "(allow network*)",
+            "(allow file-read-metadata)",
+            '(allow file-read* (subpath "/System") (subpath "/usr/lib") '
+            '(subpath "/Library/Apple") (literal "/dev/null") (literal "/dev/urandom"))',
+            f"(allow file-read* (subpath {json.dumps(str(workspace))}) "
+            f"(subpath {json.dumps(str(auth_home))}) (literal {json.dumps(runtime)}))",
+            f'(allow file-write* (subpath {json.dumps(str(auth_home))}) (literal "/dev/null"))',
+        ]
+    )
+
+
 def run():
     from codex_cli_bin import bundled_codex_path
     from openai_codex import ApprovalMode, Codex, CodexConfig, Sandbox
@@ -21,33 +51,7 @@ def run():
         auth.write_text(request["auth"])
         auth.chmod(0o600)
         # No shell/rg/Python/tool subprocess may execute. Only app-server itself can start.
-        profile = "\n".join(
-            [
-                "(version 1)",
-                "(deny default)",
-                "(allow process-fork)",
-                "(allow process-info* (target same-sandbox))",
-                '(allow file-map-executable (subpath "/System") (subpath "/usr/lib") '
-                f"(literal {json.dumps(runtime)}))",
-                '(allow file-read* (literal "/") (subpath "/private/etc") '
-                '(subpath "/private/var/db/timezone") (literal "/dev/random"))',
-                '(allow file-read-data file-write-data (subpath "/dev/fd"))',
-                '(allow system-mac-syscall (mac-policy-name "vnguard"))',
-                '(allow system-mac-syscall (require-all (mac-policy-name "Sandbox") '
-                "(mac-syscall-number 67)))",
-                f"(allow process-exec (literal {json.dumps(runtime)}))",
-                "(allow sysctl-read)",
-                "(allow signal (target self))",
-                "(allow mach-lookup)",
-                "(allow network*)",
-                "(allow file-read-metadata)",
-                '(allow file-read* (subpath "/System") (subpath "/usr/lib") '
-                '(subpath "/Library/Apple") (literal "/dev/null") (literal "/dev/urandom"))',
-                f"(allow file-read* (subpath {json.dumps(str(workspace))}) "
-                f"(subpath {json.dumps(str(auth_home))}) (literal {json.dumps(runtime)}))",
-                f'(allow file-write* (subpath {json.dumps(str(auth_home))}) (literal "/dev/null"))',
-            ]
-        )
+        profile = runtime_profile(workspace, auth_home, runtime)
         config = CodexConfig(
             launch_args_override=(
                 "/usr/bin/sandbox-exec",
@@ -77,6 +81,14 @@ def run():
         with Codex(config) as codex:
             if request["prompt"] == "__prbot_runtime_check__":
                 sys.stdout.write(json.dumps({"initialized": codex.metadata is not None}))
+                return
+            if request["prompt"] == "__prbot_account_check__":
+                authenticated = codex.account(refresh_token=True).account is not None
+                sys.stdout.write(
+                    json.dumps(
+                        {"result": {"authenticated": authenticated}, "auth": auth.read_text()}
+                    )
+                )
                 return
             if codex.account().account is None:
                 raise RuntimeError("Codex login required")

@@ -95,20 +95,12 @@ def main():
 
             sdk_run()
         elif args.command == "sdk-check":
-            from codex_cli_bin import bundled_codex_path
-            from openai_codex import Codex, CodexConfig
+            from prbot.codex_adapter import CodexAdapter
 
-            with Codex(
-                CodexConfig(env={"CODEX_HOME": str(service.data_dir() / "sdk-check")})
-            ) as sdk:
-                print(
-                    json.dumps(
-                        {
-                            "runtime": str(bundled_codex_path()),
-                            "initialized": sdk.metadata is not None,
-                        }
-                    )
-                )
+            path = service.data_dir() / "sdk-check"
+            path.mkdir(mode=0o700, exist_ok=True)
+            result = asyncio.run(CodexAdapter("{}").invoke(path, "__prbot_runtime_check__", {}, 30))
+            print(json.dumps(result))
         elif args.command == "import-codex":
             from prbot.execution_setup import import_codex_login
 

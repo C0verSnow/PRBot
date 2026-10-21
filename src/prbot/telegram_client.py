@@ -134,7 +134,17 @@ async def run(config, state, stop, report):
                         token, auth = execution_credentials()
                         github = GitHub(token)
                         conversations.github = github
-                        executor = Executor(store, settings, github, CodexAdapter(auth), token)
+                        codex = CodexAdapter(auth)
+                        from prbot.github import DeliveryError
+
+                        try:
+                            await codex.check_auth()
+                        except (DeliveryError, TimeoutError):
+                            await github.close()
+                            raise ServiceHalted(
+                                "Codex 启动检查失败，请重新导入登录并检查运行时。"
+                            ) from None
+                        executor = Executor(store, settings, github, codex, token)
                         background = [
                             asyncio.create_task(executor.run(stop)),
                             asyncio.create_task(send_outbox(store, bot, stop)),
