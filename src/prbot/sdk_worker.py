@@ -176,8 +176,16 @@ def run():
             "ImportError",
             "ModuleNotFoundError",
             "CodexError",
-            "CodexRequestError",
-            "CodexTransportError",
+            "JsonRpcError",
+            "TransportClosedError",
+            "CodexRpcError",
+            "ParseError",
+            "InvalidRequestError",
+            "MethodNotFoundError",
+            "InvalidParamsError",
+            "InternalRpcError",
+            "ServerBusyError",
+            "RetryLimitExceededError",
             "OSError",
         }:
             name = "Exception"

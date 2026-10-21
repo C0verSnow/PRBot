@@ -159,3 +159,22 @@ def test_worker_exception_only_exposes_allowlisted_metadata(monkeypatch, capsys)
     }
     assert "secret-token" not in captured.out + captured.err
     assert "user@example.com" not in captured.out + captured.err
+
+
+def test_real_sdk_transport_exception_type_survives_safe_boundary(monkeypatch, capsys):
+    from openai_codex.errors import TransportClosedError
+
+    from prbot import sdk_worker
+
+    def fail():
+        sdk_worker._stage = "initialize"
+        raise TransportClosedError("connection closed: Bearer secret-token")
+
+    monkeypatch.setattr(sdk_worker, "_run", fail)
+    with pytest.raises(SystemExit):
+        sdk_worker.run()
+    captured = capsys.readouterr()
+    failure = worker_failure(captured.out)
+    assert failure.exception_type == "TransportClosedError"
+    assert failure.code == "network"
+    assert "secret-token" not in captured.out + str(failure)
