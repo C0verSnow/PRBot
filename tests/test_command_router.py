@@ -15,7 +15,7 @@ def test_ignores_non_commands(update, text):
 
 
 def test_unknown_command(update):
-    assert "仅支持 /id" in CommandRouter("MyBot").dispatch(update("/unknown"))
+    assert "/id" in CommandRouter("MyBot").dispatch(update("/unknown"))
 
 
 def test_channel_and_empty_update(update):

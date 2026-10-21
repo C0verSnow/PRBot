@@ -47,6 +47,11 @@ class Executor:
         stage = "running"
         self.store.change(tid, stage)
         try:
+            if (
+                task["user_id"] not in self.settings.allowed_users
+                or task["repo"] not in self.settings.allowed_repos
+            ):
+                raise DeliveryError("任务发起用户或仓库已不在当前允许范围内，未执行修改。")
             repository = await self.github.repository(task["repo"])
             self.store.change(tid, stage, repository=repository, read_at=time.time())
             task = self.store.get(tid)

@@ -26,6 +26,15 @@ def run():
                 "(version 1)",
                 "(deny default)",
                 "(allow process-fork)",
+                "(allow process-info* (target same-sandbox))",
+                '(allow file-map-executable (subpath "/System") (subpath "/usr/lib") '
+                f"(literal {json.dumps(runtime)}))",
+                '(allow file-read* (literal "/") (subpath "/private/etc") '
+                '(subpath "/private/var/db/timezone") (literal "/dev/random"))',
+                '(allow file-read-data file-write-data (subpath "/dev/fd"))',
+                '(allow system-mac-syscall (mac-policy-name "vnguard"))',
+                '(allow system-mac-syscall (require-all (mac-policy-name "Sandbox") '
+                "(mac-syscall-number 67)))",
                 f"(allow process-exec (literal {json.dumps(runtime)}))",
                 "(allow sysctl-read)",
                 "(allow signal (target self))",

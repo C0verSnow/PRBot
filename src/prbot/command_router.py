@@ -33,7 +33,7 @@ class CommandRouter:
                 return self.conversations.handle(update, name.lower())
             return "仓库任务未启用，请先配置凭据和允许范围。"
         handler = self.handlers.get(name.lower())
-        return handler(message) if handler else "当前仅支持 /id，发送它可查看身份信息。"
+        return handler(message) if handler else "支持 /id、/FinishIssue 和 /cancel。"
 
     async def dispatch_async(self, update):
         message = update.message
