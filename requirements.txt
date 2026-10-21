@@ -15,3 +15,8 @@ typing_extensions==4.15.0
 
 openai-codex==0.163.0
 openai-codex-cli-bin==0.163.0
+pydantic==2.13.5
+pydantic-core==2.46.5
+packaging==26.3
+annotated-types==0.8.0
+typing-inspection==0.4.4

@@ -65,6 +65,9 @@ def run():
             },
         )
         with Codex(config) as codex:
+            if request["prompt"] == "__prbot_runtime_check__":
+                sys.stdout.write(json.dumps({"initialized": codex.metadata is not None}))
+                return
             if codex.account().account is None:
                 raise RuntimeError("Codex login required")
             thread = codex.thread_start(
@@ -79,7 +82,9 @@ def run():
             if str(result.status.value) != "completed" or not result.final_response:
                 raise RuntimeError("Codex turn did not complete")
             json.loads(result.final_response)
-            sys.stdout.write(result.final_response)
+            sys.stdout.write(
+                json.dumps({"result": json.loads(result.final_response), "auth": auth.read_text()})
+            )
 
 
 if __name__ == "__main__":

@@ -100,7 +100,16 @@ class CodexAdapter:
                 )
             if proc.returncode:
                 raise DeliveryError("Codex SDK 执行失败，请检查 Plus 登录状态、额度和运行时。")
-            return json.loads(out)
+            response = json.loads(out)
+            if prompt == "__prbot_runtime_check__":
+                return response
+            updated = response["auth"]
+            if updated != self.auth:
+                from prbot.task_config import credential
+
+                credential("codex-login", updated)
+                self.auth = updated
+            return response["result"]
         except (ValueError, UnicodeError):
             raise DeliveryError("Codex 未返回可验证的结构化结果。") from None
         finally:

@@ -343,3 +343,10 @@ async def test_sdk_protocol_initializes_without_credentials(tmp_path):
         assert sdk.metadata is not None
         assert sdk.account().account is None
         assert "GITHUB_TOKEN" not in os.environ
+
+
+async def test_sandboxed_sdk_runtime_initializes(tmp_path):
+    from prbot.codex_adapter import CodexAdapter
+
+    result = await CodexAdapter("{}").invoke(tmp_path, "__prbot_runtime_check__", {}, 30)
+    assert result == {"initialized": True}
