@@ -16,7 +16,7 @@ from prbot.tasks import repository_url
 def asset_directory():
     if getattr(sys, "frozen", False):
         return Path(sys._MEIPASS) / "ui"
-    return Path(__file__).parent / "assets"
+    return Path(__file__).resolve().parents[2] / "frontend/dist"
 
 
 def prepare_draft(value):
@@ -54,6 +54,24 @@ def show(check_output=None):
     class WindowDelegate(NSObject):
         def windowWillClose_(self, notification):
             AppKit.NSApplication.sharedApplication().terminate_(None)
+
+    # Register the block ABI on our delegate explicitly. The packaged runtime on
+    # macOS 14 otherwise receives an untyped navigation decision block.
+    objc.registerMetaDataForSelector(
+        b"Bridge",
+        b"webView:decidePolicyForNavigationAction:decisionHandler:",
+        {
+            "arguments": {
+                4: {
+                    "type": b"@?",
+                    "callable": {
+                        "retval": {"type": b"v"},
+                        "arguments": {0: {"type": b"^v"}, 1: {"type": b"q"}},
+                    },
+                }
+            }
+        },
+    )
 
     class Bridge(
         NSObject,
@@ -95,7 +113,7 @@ def show(check_output=None):
                 self.deliver("不支持的请求。", False)
                 return
             action = body.get("action")
-            if action not in ACTIONS | {"ready", "draft"}:
+            if not isinstance(action, str) or action not in ACTIONS | {"ready", "draft"}:
                 self.deliver("不支持的操作。", False)
                 return
             if action == "ready":

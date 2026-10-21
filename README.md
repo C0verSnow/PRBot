@@ -71,6 +71,6 @@ Codex 登录继续通过“导入 Codex 登录”保存到钥匙串，不放入 
 
 首页输入框用于整理任务，格式为 `https://github.com/owner/repo 具体需求`。点击右下箭头会验证配置的 Bot、将仓库链接和需求复制到系统剪贴板，并打开对应 Telegram Bot。**此时尚未提交任务。** 先发送 `/FinishIssue`，收到提示后粘贴已复制内容；Telegram 继续执行原有身份、仓库允许范围和去重校验。需求会进入系统剪贴板，窗口不保存草稿，当前不提供通用 AI 对话或直接桌面执行。
 
-其余导航项显示当前版本的功能说明，任务列表与交付回执仍在 Telegram，代码结果在 GitHub PR。关闭窗口不停止后台服务。窗口资源随 DMG 打包，以本地 WebKit 加载，不依赖网络网页、额外浏览器或本地 HTTP 服务。
+其余导航项显示当前版本的功能说明，任务列表与交付回执仍在 Telegram，代码结果在 GitHub PR。关闭窗口不停止后台服务。界面采用 React + TypeScript + Tailwind CSS，源码位于 `frontend/`。前端仅在远端 CI 通过 Vite 编译，生成的静态资源随 DMG 打包，以本地 WebKit 加载，不依赖网络网页、额外浏览器或本地 HTTP 服务。
 
 远端 CI 对安装包执行真实 WebKit 加载、导航与设置交互、原生状态桥接及截图检查，产物包含 `PRBot-ui.png` 和 `PRBot-ui.json`。不进行本地编译、打包或源码测试。

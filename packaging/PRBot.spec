@@ -11,7 +11,7 @@ analysis = Analysis(
     pathex=[str(root / 'src')],
     binaries=sdk_binaries + cli_binaries,
     datas=collect_data_files('certifi') + sdk_data + cli_data
-        + [(str(root / '.env.example'), '.'), (str(root / 'src/prbot/assets'), 'ui')],
+        + [(str(root / '.env.example'), '.'), (str(root / 'frontend/dist'), 'ui')],
     hiddenimports=collect_submodules('keyring.backends.macOS') + sdk_imports + cli_imports,
     hookspath=[], runtime_hooks=[], excludes=['tkinter', 'pytest'],
     noarchive=False,

@@ -8,3 +8,5 @@ dist/
 .env
 *.p12
 *.key
+
+node_modules/
