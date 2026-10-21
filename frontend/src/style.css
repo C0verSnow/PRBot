@@ -1,0 +1,28 @@
+@import "tailwindcss";
+@theme {
+  --color-canvas: #faf9f7;
+  --color-sidebar: #f5f4f0;
+  --color-ink: #24231f;
+  --color-muted: #86847d;
+  --color-line: #e4e2dc;
+  --color-accent: #cc785c;
+  --font-sans: -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
+  --font-serif: Georgia, "Times New Roman", serif;
+}
+@layer base {
+  :root { color-scheme: light; font-family: var(--font-sans); font-size: 14px; }
+  body { margin: 0; }
+  button { cursor: pointer; }
+  button:disabled { opacity: .5; cursor: wait; }
+  button:focus-visible, textarea:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 3px; }
+  textarea:focus-visible { outline: none; }
+  [hidden] { display: none !important; }
+}
+@layer components {
+  .nav-item { @apply flex min-h-[34px] w-full items-center gap-3.5 rounded-lg px-3 py-2 text-left text-[#55544f] transition-colors hover:bg-[#ebe9e3]; }
+  .sidebar-note { @apply mx-3 my-2 text-xs leading-[1.7] text-[#97958e]; }
+  .secondary { @apply rounded-lg border border-line bg-white px-[13px] py-[9px] text-xs hover:bg-[#efede7]; }
+  .settings-dialog { @apply m-auto max-h-[calc(100vh_-_64px)] w-[620px] max-w-[calc(100vw_-_56px)] rounded-[17px] border border-line bg-canvas p-0 text-ink shadow-[0_22px_90px_#25231a30]; }
+  .settings-dialog::backdrop { background: #24231f35; backdrop-filter: blur(3px); }
+}
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }

@@ -1,0 +1,104 @@
+"""Non-secret policy in config.json; execution credentials in the macOS keychain."""
+
+import os
+from dataclasses import dataclass, field
+from pathlib import Path
+
+from prbot.config import ConfigError, environment_value, read_settings
+from prbot.tasks import repository_url
+
+SECRET_KEYS = {"GITHUB_TOKEN", "OPENAI_API_KEY", "TELEGRAM_BOT_TOKEN"}
+
+
+def credential(name, value=None):
+    from keyring.backends.macOS import Keyring
+
+    try:
+        backend = Keyring()
+        if value is not None:
+            backend.set_password("org.prbot.execution", name, value)
+            return None
+        return environment_value(name) or backend.get_password("org.prbot.execution", name)
+    except Exception:
+        raise ConfigError("执行凭据不可读取，请解锁钥匙串并重新配置。") from None
+
+
+@dataclass(frozen=True)
+class TaskConfig:
+    allowed_users: frozenset = frozenset()
+    allowed_repos: frozenset = frozenset()
+    session_ttl: int = 900
+    timeout: int = 1800
+    concurrency: int = 1
+    ci_timeout: int = 3600
+    required_checks: tuple = ("test", "dmg")
+    local_repos: dict = field(default_factory=dict)
+
+    workspace_root: str | None = None
+
+    @property
+    def enabled(self):
+        return bool(self.allowed_users and self.allowed_repos)
+
+    @classmethod
+    def load(cls):
+        settings = read_settings()
+
+        def get(key, default):
+            return environment_value(key, settings.get(key, default))
+
+        try:
+            users = frozenset(int(v) for v in str(get("PRBOT_ALLOWED_USERS", "")).split(",") if v)
+            repos = frozenset(
+                repository_url("https://github.com/" + v.strip())
+                for v in str(get("PRBOT_ALLOWED_REPOS", "")).split(",")
+                if v.strip()
+            )
+            values = [
+                int(get(k, d))
+                for k, d in (
+                    ("PRBOT_SESSION_TTL", 900),
+                    ("PRBOT_TASK_TIMEOUT", 1800),
+                    ("PRBOT_TASK_CONCURRENCY", 1),
+                    ("PRBOT_CI_TIMEOUT", 3600),
+                )
+            ]
+            if any(v < 1 for v in values) or values[2] > 4:
+                raise ValueError
+            checks = tuple(
+                v.strip()
+                for v in str(get("PRBOT_REQUIRED_CHECKS", "test,dmg")).split(",")
+                if v.strip()
+            )
+            if not checks:
+                raise ValueError
+            local = get("PRBOT_LOCAL_REPOS", {})
+            if not isinstance(local, dict):
+                raise ValueError
+            root = get("PRBOT_WORK_ROOT", None)
+            if root is not None:
+                root = validate_work_root(root)
+            return cls(users, repos, *values, checks, local, root)
+        except (ValueError, TypeError):
+            raise ConfigError(
+                "任务配置错误：请检查允许用户、owner/repo、正整数超时和必需检查名。"
+            ) from None
+
+
+def validate_work_root(value):
+    try:
+        path = Path(value).expanduser()
+        if not path.is_absolute() or not path.is_dir() or not os.access(path, os.W_OK):
+            raise ValueError
+        return str(path.resolve())
+    except (ValueError, TypeError, OSError):
+        raise ConfigError("工作路径必须是当前用户可写的文件夹，请重新选择。") from None
+
+
+def select_work_root(value):
+    from prbot.config import prepare_env_directory, save_settings
+
+    path = validate_work_root(value)
+    prepare_env_directory(Path(path) / "PRBot-workspaces")
+    save_settings({"PRBOT_WORK_ROOT": path})
+    return path

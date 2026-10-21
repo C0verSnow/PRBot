@@ -74,6 +74,7 @@ def main():
         default="ui",
         choices=[
             "ui",
+            "ui-check",
             "run",
             "start",
             "stop",
@@ -81,14 +82,59 @@ def main():
             "status",
             "autostart",
             "configure",
+            "configure-tasks",
             "version",
+            "sdk-worker",
+            "sdk-check",
+            "import-codex",
         ],
     )
     parser.add_argument("value", nargs="?", choices=["on", "off"])
     args = parser.parse_args()
     try:
-        if args.command == "version":
+        if args.command == "sdk-worker":
+            from prbot.sdk_worker import run as sdk_run
+
+            sdk_run()
+        elif args.command == "sdk-check":
+            from prbot.codex_adapter import CodexAdapter
+
+            path = service.data_dir() / "sdk-check"
+            path.mkdir(mode=0o700, exist_ok=True)
+            result = asyncio.run(CodexAdapter("{}").invoke(path, "__prbot_runtime_check__", {}, 30))
+            print(json.dumps(result))
+        elif args.command == "configure-tasks":
+            from prbot.execution_setup import configure_tasks
+
+            values = json.load(sys.stdin)
+            if values.get("telegram_token"):
+                token = validate_token(values["telegram_token"])
+                asyncio.run(validate_api(token))
+                keychain_token(token)
+            if values.get("work_root"):
+                from prbot.task_config import select_work_root
+
+                select_work_root(values["work_root"])
+            configure_tasks(values["github_token"], values["users"], values["repos"])
+            print("任务凭据已保存到钥匙串，允许范围已保存；请重启服务。")
+        elif args.command == "import-codex":
+            from prbot.execution_setup import import_codex_login
+
+            import_codex_login()
+            print("现有 Codex 登录已导入钥匙串，请重启服务。")
+        elif args.command == "version":
             print(__version__)
+        elif args.command == "ui-check":
+            from pathlib import Path
+
+            from prbot.desktop import show
+
+            if os.environ.get("CI") != "true" or not os.environ.get("PRBOT_UI_CHECK_OUTPUT"):
+                raise ConfigError("界面检查只允许在远端 CI 中运行。")
+            output = Path(os.environ["PRBOT_UI_CHECK_OUTPUT"])
+            show(check_output=output)
+            if not json.loads(output.with_suffix(".json").read_text()).get("ok"):
+                raise ConfigError("安装包界面检查失败，请检查远端产物。")
         elif args.command == "ui":
             from prbot.ui import show
 

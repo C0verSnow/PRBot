@@ -1,0 +1,117 @@
+"""Remote CI only: exercise the packaged WebKit UI and export a real window snapshot."""
+
+import json
+import os
+
+
+def schedule_check(web, output):
+    import AppKit
+    import WebKit
+    from PyObjCTools import AppHelper
+
+    finished = False
+    interaction_error = None
+
+    def finish(ok, detail):
+        nonlocal finished
+        if finished:
+            return
+        finished = True
+        output.with_suffix(".json").write_text(json.dumps({"ok": ok, "detail": detail}))
+        # AppHelper.stopEventLoop may terminate NSApplication with exit status 0.
+        # This isolated CI subprocess must propagate its actual verdict to Actions.
+        os._exit(0 if ok else 2)
+
+    def snapshot(image, error):
+        if error or image is None:
+            finish(False, "WebKit snapshot failed")
+            return
+        bitmap = AppKit.NSBitmapImageRep.imageRepWithData_(image.TIFFRepresentation())
+        data = bitmap.representationUsingType_properties_(AppKit.NSBitmapImageFileTypePNG, {})
+        ok = bool(data.writeToFile_atomically_(str(output), True))
+        finish(
+            ok and interaction_error is None,
+            interaction_error
+            or "React DOM, navigation, settings, native bridge and snapshot checked",
+        )
+
+    def checked(result, error):
+        nonlocal interaction_error
+        if finished:
+            return
+        if error or (isinstance(result, str) and result.startswith("failed:")):
+            interaction_error = result if not error else "JavaScript evaluation failed"
+        if interaction_error or result == "ok":
+            web.takeSnapshotWithConfiguration_completionHandler_(
+                WebKit.WKSnapshotConfiguration.alloc().init(), snapshot
+            )
+        else:
+            AppHelper.callLater(0.1, poll_result)
+
+    def poll_result():
+        web.evaluateJavaScript_completionHandler_("window.__uiCheckResult || 'pending'", checked)
+
+    def poll():
+        if finished:
+            return
+        web.evaluateJavaScript_completionHandler_(
+            "document.readyState === 'complete' && typeof window.receiveNative === 'function'"
+            " && document.getElementById('service-label')"
+            " && document.getElementById('service-label').textContent !== '查看服务状态'",
+            loaded,
+        )
+
+    def loaded(result, error):
+        if not result or error:
+            AppHelper.callLater(0.25, poll)
+            return
+        # Native ready/status bridge has completed. Await React's updates after user events.
+        web.evaluateJavaScript_completionHandler_(
+            """
+(async () => {
+  const assert = (value, label) => { if (!value) throw new Error(label || 'UI assertion failed'); };
+  const tick = () => new Promise(resolve => setTimeout(resolve, 40));
+  assert(getComputedStyle(document.querySelector('#root > div')).display === 'flex',
+    'Tailwind root flex layout missing');
+  assert(document.querySelector('aside').getBoundingClientRect().width === 252,
+    'Sidebar width is not 252px');
+  assert(getComputedStyle(document.querySelector('#composer')).borderRadius === '17px',
+    'Composer border radius missing');
+  assert(document.querySelector('#greeting').textContent === 'What shall we think through?');
+  assert(document.querySelectorAll('[data-view]').length === 6);
+  assert(document.querySelectorAll('.composer button').length === 1);
+  for (const view of ['Projects', 'Artifacts', 'Code', 'Pinned', 'Chats and tasks']) {
+    document.querySelector(`[data-view="${view}"]`).click();
+    await tick();
+    assert(!document.getElementById('empty-view').hidden);
+    assert(document.getElementById('empty-description').textContent.length > 15);
+    assert(document.querySelector(`[data-view="${view}"]`).getAttribute('aria-current'));
+  }
+  document.getElementById('back-new').click();
+  await tick();
+  assert(!document.getElementById('new-view').hidden);
+  const input = document.getElementById('draft');
+  Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(
+    input, 'https://github.com/owner/repo 创建文档并说明验收要求');
+  input.dispatchEvent(new Event('input', {bubbles:true}));
+  await tick();
+  document.getElementById('user').click();
+  await tick();
+  assert(document.getElementById('settings').open);
+  assert(document.querySelectorAll('[data-action]').length === 11);
+  document.getElementById('close-settings').click();
+  await tick();
+  assert(!document.getElementById('settings').open);
+  assert(input.value.includes('owner/repo'));
+  Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(input, '');
+  input.dispatchEvent(new Event('input', {bubbles:true}));
+  await tick();
+  window.__uiCheckResult = 'ok';
+})().catch(error => { window.__uiCheckResult = 'failed:' + error.message; });
+true;
+""",
+            lambda result, error: poll_result(),
+        )
+
+    AppHelper.callLater(0.25, poll)
+    AppHelper.callLater(45, lambda: finish(False, "UI load or snapshot timed out"))

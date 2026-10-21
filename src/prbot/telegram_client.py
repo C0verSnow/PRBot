@@ -15,6 +15,7 @@ from telegram.error import (
 )
 
 from prbot.command_router import CommandRouter
+from prbot.tasks import Conversations, TaskStore
 
 log = logging.getLogger(__name__)
 
@@ -69,7 +70,13 @@ class Receiver:
             raise ServiceHalted("回复已尝试 5 次，请检查日志和进度库；确认后按手册处理。")
         self.state.mark(uid, "processing")
         try:
-            reply = self.router.dispatch(update)
+            store = TaskStore(self.state)
+            reply = store.reply(uid)
+            if reply is None:
+                reply = await self.router.dispatch_async(update)
+                if reply is not None:
+                    with self.state.db:
+                        store.save_reply(uid, reply)
         except Exception as error:
             self.state.mark(uid, "failed", type(error).__name__, attempt=True)
             log.error("命令处理异常 type=%s", type(error).__name__)
@@ -103,6 +110,12 @@ async def run(config, state, stop, report):
     bot = Bot(config.token)
     failures = 0
     initialized = False
+    background = []
+    from prbot.task_config import TaskConfig
+
+    settings = TaskConfig.load()
+    store = TaskStore(state)
+    conversations = Conversations(store, settings) if settings.enabled else None
     try:
         while not stop.is_set():
             try:
@@ -111,8 +124,45 @@ async def run(config, state, stop, report):
                     if (await bot.get_webhook_info()).url:
                         raise ServiceHalted("Bot 已配置 Webhook，请先停用原服务并删除 Webhook。")
                     initialized = True
-                    receiver = Receiver(bot, state, CommandRouter(bot.username))
+                    receiver = Receiver(bot, state, CommandRouter(bot.username, conversations))
+                    if settings.enabled:
+                        from prbot.codex_adapter import CodexAdapter, SDKFailure
+                        from prbot.execution_setup import execution_credentials
+                        from prbot.executor import Executor, send_outbox
+                        from prbot.github import GitHub
+
+                        token, auth = execution_credentials()
+                        github = GitHub(token)
+                        conversations.github = github
+                        codex = CodexAdapter(auth)
+                        from prbot.github import DeliveryError
+
+                        try:
+                            await codex.check_auth()
+                        except SDKFailure as error:
+                            await github.close()
+                            log.error(
+                                "Codex 启动检查失败 code=%s stage=%s type=%s",
+                                error.code,
+                                error.stage,
+                                error.exception_type,
+                            )
+                            raise ServiceHalted(str(error)) from None
+                        except (DeliveryError, TimeoutError) as error:
+                            await github.close()
+                            raise ServiceHalted(
+                                f"Codex 启动检查失败（{type(error).__name__}），"
+                                "请检查网络、登录及运行时。"
+                            ) from None
+                        executor = Executor(store, settings, github, codex, token)
+                        background = [
+                            asyncio.create_task(executor.run(stop)),
+                            asyncio.create_task(send_outbox(store, bot, stop)),
+                        ]
                     log.info("Token API 校验成功，开始长轮询")
+                for worker in background:
+                    if worker.done() and worker.exception():
+                        raise ServiceHalted("任务后台异常退出，请查看任务状态并重启服务。")
                 report("running", "Telegram 已连接，正在监听")
                 updates = await poll_until_stopped(
                     bot,
@@ -150,4 +200,10 @@ async def run(config, state, stop, report):
                     f"API 错误 {type(error).__name__}，请检查配置和日志。"
                 ) from None
     finally:
+        stop.set()
+        for task in background:
+            task.cancel()
+        await asyncio.gather(*background, return_exceptions=True)
+        if background:
+            await github.close()
         await bot.shutdown()

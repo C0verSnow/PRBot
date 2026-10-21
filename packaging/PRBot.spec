@@ -1,15 +1,18 @@
 # Run only in remote macOS CI. The app embeds Python; it never uses user site-packages.
 from pathlib import Path
 
-from PyInstaller.utils.hooks import collect_data_files, collect_submodules
+from PyInstaller.utils.hooks import collect_all, collect_data_files, collect_submodules
 
+sdk_data, sdk_binaries, sdk_imports = collect_all("openai_codex")
+cli_data, cli_binaries, cli_imports = collect_all("codex_cli_bin")
 root = Path(SPECPATH).parent
 analysis = Analysis(
     [str(root / 'packaging/entry.py')],
     pathex=[str(root / 'src')],
-    binaries=[],
-    datas=collect_data_files('certifi'),
-    hiddenimports=collect_submodules('keyring.backends.macOS'),
+    binaries=sdk_binaries + cli_binaries,
+    datas=collect_data_files('certifi') + sdk_data + cli_data
+        + [(str(root / '.env.example'), '.'), (str(root / 'frontend/dist'), 'ui')],
+    hiddenimports=collect_submodules('keyring.backends.macOS') + sdk_imports + cli_imports,
     hookspath=[], runtime_hooks=[], excludes=['tkinter', 'pytest'],
     noarchive=False,
 )
@@ -27,6 +30,6 @@ app = BUNDLE(
         'CFBundleShortVersionString': '0.1.0',
         'LSMinimumSystemVersion': '14.0',
         'NSHighResolutionCapable': True,
-        'LSUIElement': True,
+        'LSUIElement': False,
     },
 )
