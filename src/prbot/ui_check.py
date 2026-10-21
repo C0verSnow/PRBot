@@ -71,9 +71,12 @@ def schedule_check(web, output):
 (async () => {
   const assert = (value, label) => { if (!value) throw new Error(label || 'UI assertion failed'); };
   const tick = () => new Promise(resolve => setTimeout(resolve, 40));
-  assert(getComputedStyle(document.querySelector('#root > div')).display === 'flex', 'Tailwind root flex layout missing');
-  assert(document.querySelector('aside').getBoundingClientRect().width === 252, 'Sidebar width is not 252px');
-  assert(getComputedStyle(document.querySelector('#composer')).borderRadius === '17px', 'Composer border radius missing');
+  assert(getComputedStyle(document.querySelector('#root > div')).display === 'flex',
+    'Tailwind root flex layout missing');
+  assert(document.querySelector('aside').getBoundingClientRect().width === 252,
+    'Sidebar width is not 252px');
+  assert(getComputedStyle(document.querySelector('#composer')).borderRadius === '17px',
+    'Composer border radius missing');
   assert(document.querySelector('#greeting').textContent === 'What shall we think through?');
   assert(document.querySelectorAll('[data-view]').length === 6);
   assert(document.querySelectorAll('.composer button').length === 1);
