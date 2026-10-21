@@ -58,7 +58,7 @@ def show(check_output=None):
     # Register the block ABI on our delegate explicitly. The packaged runtime on
     # macOS 14 otherwise receives an untyped navigation decision block.
     objc.registerMetaDataForSelector(
-        b"Bridge",
+        b"NSObject",
         b"webView:decidePolicyForNavigationAction:decisionHandler:",
         {
             "arguments": {
@@ -73,13 +73,7 @@ def show(check_output=None):
         },
     )
 
-    class Bridge(
-        NSObject,
-        protocols=[
-            objc.protocolNamed("WKScriptMessageHandler"),
-            objc.protocolNamed("WKNavigationDelegate"),
-        ],
-    ):
+    class Bridge(NSObject):
         busy = False
 
         @objc.python_method
@@ -171,6 +165,7 @@ def show(check_output=None):
             self.busy = False
             self.deliver(message, ok)
 
+        @objc.typedSelector(b"v@:@@@?")
         def webView_decidePolicyForNavigationAction_decisionHandler_(
             self, web, navigation, handler
         ):
