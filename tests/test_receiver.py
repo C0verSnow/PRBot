@@ -79,8 +79,17 @@ async def test_handler_fault_does_not_acknowledge(update, state):
     assert state.record(10) == ("failed", 1)
 
 
+@pytest.fixture
+def shared_application(monkeypatch):
+    from prbot.conversation_service import ConversationService
+
+    application = ConversationService(values={}, archive=Mock(), adapter=Mock())
+    monkeypatch.setattr("prbot.conversation_service.ConversationService", lambda: application)
+    return application
+
+
 @pytest.mark.parametrize("error", [Conflict("conflict"), InvalidToken("invalid"), Forbidden("no")])
-async def test_fatal_api_error_halts_without_retries(monkeypatch, state, error):
+async def test_fatal_api_error_halts_without_retries(monkeypatch, state, error, shared_application):
     bot = Mock(initialize=AsyncMock(side_effect=error), shutdown=AsyncMock())
     monkeypatch.setattr("prbot.telegram_client.Bot", lambda token: bot)
     with pytest.raises(ServiceHalted):
@@ -89,7 +98,7 @@ async def test_fatal_api_error_halts_without_retries(monkeypatch, state, error):
     bot.shutdown.assert_awaited_once()
 
 
-async def test_network_recovers(monkeypatch, state):
+async def test_network_recovers(monkeypatch, state, shared_application):
     stop = asyncio.Event()
     bot = Mock(
         initialize=AsyncMock(side_effect=[NetworkError("offline"), None]),

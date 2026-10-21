@@ -57,7 +57,7 @@ def schedule_check(web, output):
         web.evaluateJavaScript_completionHandler_(
             "document.readyState === 'complete' && typeof window.receiveNative === 'function'"
             " && document.getElementById('service-label')"
-            " && document.getElementById('service-label').textContent !== '查看服务状态'",
+            " && document.getElementById('service-label').textContent !== 'Unknown'",
             loaded,
         )
 
@@ -77,35 +77,48 @@ def schedule_check(web, output):
     'Sidebar width is not 252px');
   assert(getComputedStyle(document.querySelector('#composer')).borderRadius === '17px',
     'Composer border radius missing');
-  assert(document.querySelector('#greeting').textContent === 'What shall we think through?');
-  assert(document.querySelectorAll('[data-view]').length === 6);
-  assert(document.querySelectorAll('.composer button').length === 1);
-  for (const view of ['Projects', 'Artifacts', 'Code', 'Pinned', 'Chats and tasks']) {
-    document.querySelector(`[data-view="${view}"]`).click();
-    await tick();
-    assert(!document.getElementById('empty-view').hidden);
-    assert(document.getElementById('empty-description').textContent.length > 15);
-    assert(document.querySelector(`[data-view="${view}"]`).getAttribute('aria-current'));
-  }
-  document.getElementById('back-new').click();
-  await tick();
-  assert(!document.getElementById('new-view').hidden);
+  assert(document.querySelectorAll('[data-view]').length === 2);
+  assert(document.getElementById('send').disabled, 'Invalid empty submission is enabled');
   const input = document.getElementById('draft');
-  Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(
-    input, 'https://github.com/owner/repo 创建文档并说明验收要求');
-  input.dispatchEvent(new Event('input', {bubbles:true}));
+  const edit = (element, value) => {
+    const prototype = element.tagName === 'TEXTAREA'
+      ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+    Object.getOwnPropertyDescriptor(prototype, 'value').set.call(element, value);
+    element.dispatchEvent(new Event('input', {bubbles:true}));
+  };
+  edit(document.getElementById('target-link'), 'https://github.com/owner/repo');
+  edit(input, 'Create documentation and explain acceptance criteria');
   await tick();
+  assert(!document.getElementById('send').disabled);
+  document.querySelector('[data-view="Pull Request"]').click();
+  await tick();
+  assert(document.getElementById('draft').value === '', 'Mode drafts are mixed');
+  assert(document.getElementById('send').disabled);
+  document.querySelector('[data-view="Issue"]').click();
+  await tick();
+  assert(document.getElementById('draft').value.includes('documentation'));
   document.getElementById('user').click();
   await tick();
   assert(document.getElementById('settings').open);
-  assert(document.querySelectorAll('[data-action]').length === 11);
+  assert(document.querySelectorAll('[data-section]').length === 3);
+  assert(document.querySelectorAll('.workspace-row').length === 2);
+  const buttons = Array.from(document.querySelectorAll('.workspace-row button'));
+  assert(buttons[0].getBoundingClientRect().width === buttons[1].getBoundingClientRect().width);
+  assert(buttons[0].getBoundingClientRect().right === buttons[1].getBoundingClientRect().right);
+  document.querySelector('[data-section="Background Service"]').click();
+  await tick();
+  assert(document.querySelectorAll('#service-power').length === 1);
+  assert(document.querySelector('.service-core'));
+  window.receiveNative({ok:true, status:{state:'stale',loaded:true}});
+  await tick();
+  assert(document.getElementById('service-power').getAttribute('aria-label') === 'Refresh status');
+  document.querySelector('[data-section="Workspace"]').click();
+  await tick();
   document.getElementById('close-settings').click();
   await tick();
   assert(!document.getElementById('settings').open);
-  assert(input.value.includes('owner/repo'));
-  Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(input, '');
-  input.dispatchEvent(new Event('input', {bubbles:true}));
-  await tick();
+  assert(document.activeElement.id === 'user', 'Dialog did not restore focus');
+  assert(!/[\u4e00-\u9fff]/.test(document.body.innerText), 'Non-English product copy');
   window.__uiCheckResult = 'ok';
 })().catch(error => { window.__uiCheckResult = 'failed:' + error.message; });
 true;

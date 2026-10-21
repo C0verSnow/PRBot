@@ -10,7 +10,7 @@ from telegram import Bot
 from telegram.error import TelegramError
 
 from prbot import __version__, service
-from prbot.config import Config, ConfigError, keychain_token, validate_token
+from prbot.config import Config, ConfigError
 from prbot.logging_config import configure
 from prbot.state import State, instance_lock
 from prbot.telegram_client import ServiceHalted, run
@@ -22,7 +22,7 @@ async def validate_api(token):
             return bot.username
     except TelegramError as error:
         raise ConfigError(
-            f"Token 验证失败（{type(error).__name__}），请检查 Token 和网络。"
+            f"Telegram verification failed ({type(error).__name__}). Check Infisical and network."
         ) from None
 
 
@@ -45,23 +45,23 @@ def serve():
             try:
                 config = Config.load()
                 configure(config.log_level)
-                logging.info("服务启动，配置加载成功")
-                service.report("starting", "正在验证配置")
+                logging.info("Service starting; configuration loaded")
+                service.report("starting", "Checking configuration")
                 asyncio.run(daemon(config))
             except (ConfigError, ServiceHalted) as error:
                 logging.error("%s", error)
                 service.report("halted", str(error))
                 return 0  # Intentional halt: launchd must not restart bad credentials/conflicts.
             except Exception as error:
-                logging.error("服务异常 type=%s", type(error).__name__)
-                service.report("crashed", f"异常类型：{type(error).__name__}")
+                logging.error("Service failure type=%s", type(error).__name__)
+                service.report("crashed", f"Failure type: {type(error).__name__}")
                 return 1
             finally:
-                logging.info("服务停止")
+                logging.info("Service stopped")
     except RuntimeError:
-        logging.error("已有 PRBot 实例运行")
+        logging.error("PRBot is already running")
         return 0
-    service.report("stopped", "服务已停止")
+    service.report("stopped", "Service stopped")
     return 0
 
 
@@ -80,16 +80,11 @@ def main():
             "stop",
             "restart",
             "status",
-            "autostart",
-            "configure",
-            "configure-tasks",
             "version",
             "sdk-worker",
             "sdk-check",
-            "import-codex",
         ],
     )
-    parser.add_argument("value", nargs="?", choices=["on", "off"])
     args = parser.parse_args()
     try:
         if args.command == "sdk-worker":
@@ -103,25 +98,6 @@ def main():
             path.mkdir(mode=0o700, exist_ok=True)
             result = asyncio.run(CodexAdapter("{}").invoke(path, "__prbot_runtime_check__", {}, 30))
             print(json.dumps(result))
-        elif args.command == "configure-tasks":
-            from prbot.execution_setup import configure_tasks
-
-            values = json.load(sys.stdin)
-            if values.get("telegram_token"):
-                token = validate_token(values["telegram_token"])
-                asyncio.run(validate_api(token))
-                keychain_token(token)
-            if values.get("work_root"):
-                from prbot.task_config import select_work_root
-
-                select_work_root(values["work_root"])
-            configure_tasks(values["github_token"], values["users"], values["repos"])
-            print("任务凭据已保存到钥匙串，允许范围已保存；请重启服务。")
-        elif args.command == "import-codex":
-            from prbot.execution_setup import import_codex_login
-
-            import_codex_login()
-            print("现有 Codex 登录已导入钥匙串，请重启服务。")
         elif args.command == "version":
             print(__version__)
         elif args.command == "ui-check":
@@ -130,36 +106,25 @@ def main():
             from prbot.desktop import show
 
             if os.environ.get("CI") != "true" or not os.environ.get("PRBOT_UI_CHECK_OUTPUT"):
-                raise ConfigError("界面检查只允许在远端 CI 中运行。")
+                raise ConfigError("UI checks are only allowed in remote CI.")
             output = Path(os.environ["PRBOT_UI_CHECK_OUTPUT"])
             show(check_output=output)
             if not json.loads(output.with_suffix(".json").read_text()).get("ok"):
-                raise ConfigError("安装包界面检查失败，请检查远端产物。")
+                raise ConfigError("Packaged UI check failed. Inspect remote artifacts.")
         elif args.command == "ui":
             from prbot.ui import show
 
             show()
-        elif args.command == "configure":
-            import getpass
-
-            token = validate_token(getpass.getpass("Telegram Bot Token: ").strip())
-            asyncio.run(validate_api(token))
-            keychain_token(token)
-            print("Token 已验证并保存到钥匙串。请重启服务使配置生效。")
         elif args.command == "run":
             return serve()
         elif args.command == "stop":
             service.stop()
-            print("后台服务和登录自启动已停止；下次启动可重新启用。")
-        elif args.command in {"start", "restart", "autostart"}:
+            print("Background service stopped.")
+        elif args.command in {"start", "restart"}:
             config = Config.load()
-            if args.command == "autostart" and args.value is None:
-                parser.error("autostart 需要 on 或 off")
-            # Check credentials in the controller too, before registering launchd.
             asyncio.run(validate_api(config.token))
-            automatic = (args.value == "on") if args.command == "autostart" else config.autostart
-            service.install(automatic)
-            print("后台服务已启动。")
+            service.install()
+            print("Starting background service; wait for its health report.")
         elif args.command == "status":
             print(json.dumps(service.status(), ensure_ascii=False, indent=2))
     except ConfigError as error:

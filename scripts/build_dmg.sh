@@ -15,10 +15,10 @@ mkdir -p dist/dmg-content
 ditto "$APP" dist/dmg-content/PRBot.app
 ln -s /Applications dist/dmg-content/Applications
 cp 使用手册.md .env.example dist/dmg-content/
-cat > dist/dmg-content/测试版说明.txt <<'NOTICE'
-PRBot v0.1.0 开发测试版：Apple Silicon / macOS 14+
-仅 ad hoc 签名，没有 Developer ID 签名、没有 Apple 公证。
-请阅读使用手册；此文件不能代表已通过 Gatekeeper 和真实 Telegram 安装验收。
+cat > dist/dmg-content/DEVELOPMENT-NOTICE.txt <<'NOTICE'
+PRBot v0.1.0 development build: Apple Silicon / macOS 14+
+Ad hoc signature only; no Developer ID signature or Apple notarization.
+Read the manual. This notice does not establish Gatekeeper or live-service acceptance.
 NOTICE
 hdiutil create -volname PRBot -srcfolder dist/dmg-content -ov -format UDZO \
   dist/PRBot-v0.1.0-macos-arm64.dmg

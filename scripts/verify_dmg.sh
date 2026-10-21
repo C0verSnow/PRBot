@@ -14,15 +14,14 @@ ditto "$MOUNT/PRBot.app" "$TEST_HOME/PRBot.app"
 BIN="$TEST_HOME/PRBot.app/Contents/MacOS/PRBot"
 [[ -f "$MOUNT/.env.example" ]]
 [[ -f "$TEST_HOME/PRBot.app/Contents/Resources/.env.example" ]]
-# Run with an empty HOME and without source PYTHONPATH or an external Python PATH.
-# An invalid Token is intentionally passed so this check never accesses a real credential.
+# Empty HOME must halt with an actionable Infisical bootstrap error, without network.
 VERSION="$(env -i HOME="$TEST_HOME" PATH=/usr/bin:/bin "$BIN" version)"
 [[ "$VERSION" == "0.1.0" ]]
-env -i HOME="$TEST_HOME" PATH=/usr/bin:/bin TELEGRAM_BOT_TOKEN=bad "$BIN" run
+env -i HOME="$TEST_HOME" PATH=/usr/bin:/bin "$BIN" run
 STATUS="$TEST_HOME/Library/Application Support/PRBot/status.json"
 /usr/bin/grep -q 'halted' "$STATUS"
-/usr/bin/grep -q 'Token' "$STATUS"
-# Validate the installed binary reads .env from the selected workspace without shell env.
+/usr/bin/grep -q 'INFISICAL_CLIENT_ID' "$STATUS"
+# The selected workspace contains bootstrap settings only; local bot tokens are ignored.
 mkdir -p "$TEST_HOME/PRBot-workspaces"
 python - "$TEST_HOME" <<'PYCONFIG'
 import json
@@ -34,16 +33,10 @@ root = Path(sys.argv[1])
 )
 PYCONFIG
 chmod 600 "$TEST_HOME/Library/Application Support/PRBot/config.json"
-# A format-valid dummy token plus an invalid log level fails before any API request.
-# Checking the distinct log-level error proves .env was actually read.
-cat > "$TEST_HOME/PRBot-workspaces/.env" <<'ENV'
-TELEGRAM_BOT_TOKEN=123456:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
-PRBOT_LOG_LEVEL=TRACE
-ENV
+printf 'TELEGRAM_BOT_TOKEN=ignored\n' > "$TEST_HOME/PRBot-workspaces/.env"
 chmod 600 "$TEST_HOME/PRBot-workspaces/.env"
 env -i HOME="$TEST_HOME" PATH=/usr/bin:/bin "$BIN" run
-/usr/bin/grep -q 'halted' "$STATUS"
-/usr/bin/grep -q 'PRBOT_LOG_LEVEL' "$STATUS"
+/usr/bin/grep -q 'INFISICAL_CLIENT_ID' "$STATUS"
 env -i HOME="$TEST_HOME" PATH=/usr/bin:/bin "$BIN" status > "$TEST_HOME/env-status.json"
 /usr/bin/grep -q 'PRBot-workspaces/.env' "$TEST_HOME/env-status.json"
 env -i HOME="$TEST_HOME" PATH=/usr/bin:/bin "$BIN" sdk-check > "$TEST_HOME/sdk-check.json"

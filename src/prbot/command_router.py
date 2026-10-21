@@ -12,7 +12,7 @@ class CommandRouter:
 
     def register(self, name, handler):
         if not re.fullmatch(r"[a-z][a-z0-9_]*", name) or name in self.handlers:
-            raise ValueError("命令名称无效或已注册")
+            raise ValueError("Command name is invalid or already registered")
         self.handlers[name] = handler
 
     def dispatch(self, update):
@@ -31,9 +31,9 @@ class CommandRouter:
         if name.lower() in {"finishissue", "cancel"}:
             if self.conversations:
                 return self.conversations.handle(update, name.lower())
-            return "仓库任务未启用，请先配置凭据和允许范围。"
+            return "Repository tasks are unavailable. Check Infisical and Codex sign-in."
         handler = self.handlers.get(name.lower())
-        return handler(message) if handler else "支持 /id、/FinishIssue 和 /cancel。"
+        return handler(message) if handler else "Supported commands: /id, /FinishIssue and /cancel."
 
     async def dispatch_async(self, update):
         message = update.message

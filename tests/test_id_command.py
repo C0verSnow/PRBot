@@ -14,10 +14,10 @@ def test_group_uses_sender_not_chat(update):
 
 
 def test_missing_sender(update):
-    assert "无法确定个人" in identity(update(user_id=None).message)
+    assert "Cannot identify" in identity(update(user_id=None).message)
 
 
 def test_anonymous_admin(update):
     message = update(sender_chat={"id": -999, "type": "supergroup"}).message
-    assert "无法确定个人" in identity(message)
+    assert "Cannot identify" in identity(message)
     assert "User ID: 123" not in identity(message)

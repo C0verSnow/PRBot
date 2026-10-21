@@ -14,18 +14,12 @@ class ConfigError(Exception):
 
 
 ENV_KEYS = {
-    "TELEGRAM_BOT_TOKEN",
-    "GITHUB_TOKEN",
-    "PRBOT_ALLOWED_USERS",
-    "PRBOT_ALLOWED_REPOS",
-    "PRBOT_LOG_LEVEL",
-    "PRBOT_POLL_TIMEOUT",
-    "PRBOT_AUTOSTART",
-    "PRBOT_SESSION_TTL",
-    "PRBOT_TASK_TIMEOUT",
-    "PRBOT_TASK_CONCURRENCY",
-    "PRBOT_CI_TIMEOUT",
-    "PRBOT_REQUIRED_CHECKS",
+    "INFISICAL_URL",
+    "INFISICAL_CLIENT_ID",
+    "INFISICAL_CLIENT_SECRET",
+    "INFISICAL_PROJECT_ID",
+    "INFISICAL_ENVIRONMENT",
+    "INFISICAL_SECRET_PATH",
 }
 
 
@@ -34,12 +28,12 @@ def workspace_directory():
     if selected:
         selected = Path(selected).expanduser()
         if not selected.is_absolute() or not selected.is_dir():
-            raise ConfigError("工作路径不可用，请在软件中重新选择工作路径。")
+            raise ConfigError("Working directory unavailable. Choose a folder in Settings.")
         folder = selected / "PRBot-workspaces"
     else:
         folder = data_dir() / "workspaces"
     if folder.is_symlink():
-        raise ConfigError("工作目录不能是符号链接，请重新选择工作路径。")
+        raise ConfigError("Working directory cannot be a symlink. Choose another folder.")
     return folder
 
 
@@ -50,7 +44,7 @@ def env_path():
 def prepare_env_directory(folder=None):
     folder = workspace_directory() if folder is None else Path(folder)
     if folder.is_symlink():
-        raise ConfigError("工作目录不能是符号链接，请重新选择工作路径。")
+        raise ConfigError("Working directory cannot be a symlink. Choose another folder.")
     try:
         folder.mkdir(parents=True, exist_ok=True, mode=0o700)
         source = (
@@ -62,20 +56,22 @@ def prepare_env_directory(folder=None):
         for name in (".env.example", ".env"):
             target = folder / name
             if target.is_symlink():
-                raise ConfigError("配置文件不能是符号链接，请检查工作目录。")
+                raise ConfigError(
+                    "Configuration file cannot be a symlink. Check the working directory."
+                )
             if not target.exists():
                 with open(target, "x", opener=lambda p, flags: os.open(p, flags, 0o600)) as out:
                     out.write(template)
         return folder / ".env"
     except OSError:
-        raise ConfigError("无法准备 .env，请检查工作目录权限。") from None
+        raise ConfigError("Cannot prepare .env. Check working directory permissions.") from None
 
 
 def read_env():
     # Never search arbitrary task directories or inherit their credentials.
     path = env_path()
     if path.is_symlink():
-        raise ConfigError(".env 不能是符号链接，请检查工作目录。")
+        raise ConfigError(".env cannot be a symlink. Check the working directory.")
     if not path.exists():
         return {}
     try:
@@ -84,7 +80,7 @@ def read_env():
             or not stat.S_ISREG(path.stat().st_mode)
             or path.stat().st_mode & 0o077
         ):
-            raise ConfigError(".env 必须是普通文件且仅本人可读写，请执行 chmod 600 后重试。")
+            raise ConfigError(".env must be a private regular file. Run chmod 600 and retry.")
         result = {}
         for line in path.read_text().splitlines():
             line = line.strip()
@@ -104,32 +100,21 @@ def read_env():
                 result[key] = value
         return result
     except (OSError, UnicodeError, ValueError):
-        raise ConfigError(".env 无法读取，请按 .env.example 检查 KEY=value 格式。") from None
+        raise ConfigError(
+            "Cannot read .env. Check KEY=value formatting against .env.example."
+        ) from None
 
 
 def environment_value(key, default=None):
-    if key in os.environ:
-        return os.environ[key]
-    return read_env().get(key, default)
+    from prbot.secrets import load_secrets
+
+    return load_secrets().get(key, default)
 
 
 def validate_token(token: str) -> str:
     if not isinstance(token, str) or not re.fullmatch(r"[0-9]{5,20}:[A-Za-z0-9_-]{30,100}", token):
-        raise ConfigError("Token 缺失或格式错误，请在 PRBot 中配置 BotFather 提供的 Token。")
+        raise ConfigError("Telegram token missing or invalid. Set TELEGRAM_BOT_TOKEN in Infisical.")
     return token
-
-
-def keychain_token(value=None):
-    # Select the native backend explicitly; do not fall back to plaintext storage.
-    from keyring.backends.macOS import Keyring
-
-    try:
-        backend = Keyring()
-        if value is None:
-            return backend.get_password("org.prbot.telegram", "bot-token")
-        backend.set_password("org.prbot.telegram", "bot-token", value)
-    except Exception:
-        raise ConfigError("钥匙串不可访问，请解锁登录钥匙串并允许 PRBot 访问。") from None
 
 
 def read_settings():
@@ -137,25 +122,24 @@ def read_settings():
     if not path.exists():
         return {}
     if path.stat().st_mode & 0o077:
-        raise ConfigError("config.json 权限太宽，请执行 chmod 600 后重试。")
+        raise ConfigError("config.json permissions are too broad. Run chmod 600 and retry.")
     try:
         result = json.loads(path.read_text())
         if not isinstance(result, dict):
             raise ValueError
         return result
     except (ValueError, OSError):
-        raise ConfigError("config.json 无法读取，请修正 JSON 格式和文件权限。") from None
+        raise ConfigError(
+            "Cannot read config.json. Check JSON formatting and file permissions."
+        ) from None
 
 
 def save_settings(values):
     path = data_dir() / "config.json"
-    # Only settings, never copy environment variables or a Token into this file.
-    allowed = {
-        k: v
-        for k, v in values.items()
-        if k not in {"TELEGRAM_BOT_TOKEN", "GITHUB_TOKEN", "OPENAI_API_KEY"}
-    }
+    # Only the user's local workspace selection may be persisted.
+    allowed = {k: v for k, v in values.items() if k == "PRBOT_WORK_ROOT"}
     old = read_settings()
+    old = {k: v for k, v in old.items() if k == "PRBOT_WORK_ROOT"}
     old.update(allowed)
     tmp = path.with_suffix(".tmp")
     with open(tmp, "w", opener=lambda p, f: os.open(p, f, 0o600)) as out:
@@ -171,29 +155,20 @@ class Config:
     token: str = field(repr=False)
     log_level: str = "INFO"
     poll_timeout: int = 30
-    autostart: bool = False
 
     @classmethod
     def load(cls):
-        settings = read_settings()
+        from prbot.secrets import require_secrets
 
-        def get(key, default=None):
-            return environment_value(key, settings.get(key, default))
-
-        token = environment_value("TELEGRAM_BOT_TOKEN") or settings.get("TELEGRAM_BOT_TOKEN")
-        if not token:
-            token = keychain_token()
-        token = validate_token(token or "")
-        level = str(get("PRBOT_LOG_LEVEL", "INFO")).upper()
+        values = require_secrets("TELEGRAM_BOT_TOKEN")
+        token = validate_token(values["TELEGRAM_BOT_TOKEN"])
+        level = str(values.get("PRBOT_LOG_LEVEL", "INFO")).upper()
         if level not in {"DEBUG", "INFO", "WARNING", "ERROR"}:
-            raise ConfigError("PRBOT_LOG_LEVEL 只能是 DEBUG、INFO、WARNING、ERROR。")
+            raise ConfigError("PRBOT_LOG_LEVEL must be DEBUG, INFO, WARNING or ERROR.")
         try:
-            timeout = int(get("PRBOT_POLL_TIMEOUT", 30))
-            if not 1 <= timeout <= 50:
+            timeout = int(values.get("PRBOT_POLL_TIMEOUT", 10))
+            if not 1 <= timeout <= 10:
                 raise ValueError
         except (ValueError, TypeError):
-            raise ConfigError("PRBOT_POLL_TIMEOUT 必须为 1 到 50 秒。") from None
-        autostart = str(get("PRBOT_AUTOSTART", "false")).lower()
-        if autostart not in {"true", "false"}:
-            raise ConfigError("PRBOT_AUTOSTART 只能是 true 或 false。")
-        return cls(token, level, timeout, autostart == "true")
+            raise ConfigError("PRBOT_POLL_TIMEOUT must be 1 to 10 seconds.") from None
+        return cls(token, level, timeout)

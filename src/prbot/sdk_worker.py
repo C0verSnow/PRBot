@@ -1,4 +1,4 @@
-"""Private subprocess entry; clean environment, isolated auth, no executable tools."""
+"""Full Access SDK worker; temporary auth, host tools, explicit never-approve policy."""
 
 import json
 import os
@@ -6,40 +6,6 @@ import sys
 import tempfile
 from contextlib import contextmanager
 from pathlib import Path
-
-
-def runtime_profile(workspace, auth_home, runtime):
-    return "\n".join(
-        [
-            "(version 1)",
-            "(deny default)",
-            "(allow process-fork)",
-            "(allow process-info* (target same-sandbox))",
-            '(allow file-map-executable (subpath "/System") (subpath "/usr/lib") '
-            f"(literal {json.dumps(runtime)}))",
-            '(allow file-read* (literal "/") (subpath "/private/etc") '
-            '(subpath "/private/var/db/timezone") (literal "/dev/random"))',
-            '(allow file-read-data file-write-data (subpath "/dev/fd"))',
-            '(allow system-mac-syscall (mac-policy-name "vnguard"))',
-            '(allow system-mac-syscall (require-all (mac-policy-name "Sandbox") '
-            "(mac-syscall-number 67)))",
-            f"(allow process-exec (literal {json.dumps(runtime)}))",
-            "(allow sysctl-read)",
-            "(allow signal (target self))",
-            "(allow mach-lookup)",
-            '(allow ipc-posix-shm-read* (ipc-posix-name-prefix "apple.cfprefs."))',
-            '(allow user-preference-read (preference-domain "com.openai.codex"))',
-            '(allow file-read* (subpath "/Library/Managed Preferences") '
-            '(subpath "/Library/Preferences"))',
-            "(allow network*)",
-            "(allow file-read-metadata)",
-            '(allow file-read* (subpath "/System") (subpath "/usr/lib") '
-            '(subpath "/Library/Apple") (literal "/dev/null") (literal "/dev/urandom"))',
-            f"(allow file-read* (subpath {json.dumps(str(workspace))}) "
-            f"(subpath {json.dumps(str(auth_home))}) (literal {json.dumps(runtime)}))",
-            f'(allow file-write* (subpath {json.dumps(str(auth_home))}) (literal "/dev/null"))',
-        ]
-    )
 
 
 @contextmanager
@@ -80,35 +46,21 @@ def _run():
         auth = auth_home / "auth.json"
         auth.write_text(request["auth"])
         auth.chmod(0o600)
-        # No shell/rg/Python/tool subprocess may execute. Only app-server itself can start.
-        profile = runtime_profile(workspace, auth_home, runtime)
         config = CodexConfig(
             launch_args_override=(
-                "/usr/bin/sandbox-exec",
-                "-p",
-                profile,
                 runtime,
                 "-c",
                 'cli_auth_credentials_store="file"',
                 "-c",
-                "features.shell_tool=false",
+                'sandbox_mode="danger-full-access"',
                 "-c",
-                "features.apps=false",
-                "-c",
-                "features.apply_patch_freeform=false",
-                "-c",
-                'web_search="disabled"',
+                'approval_policy="never"',
                 "app-server",
                 "--listen",
                 "stdio://",
             ),
             cwd=str(workspace),
-            env={
-                "HOME": private,
-                "CODEX_HOME": private,
-                "TMPDIR": private,
-                "PATH": "/usr/bin:/bin",
-            },
+            env={**os.environ, "CODEX_HOME": private},
         )
         _stage = "initialize"
         with Codex(config) as codex:
@@ -116,7 +68,7 @@ def _run():
                 thread = codex.thread_start(
                     cwd=str(workspace),
                     ephemeral=True,
-                    sandbox=Sandbox.read_only,
+                    sandbox=Sandbox.full_access,
                     approval_mode=ApprovalMode.deny_all,
                 )
                 sys.stdout.write(
@@ -145,10 +97,10 @@ def _run():
             thread = codex.thread_start(
                 cwd=str(workspace),
                 ephemeral=True,
-                sandbox=Sandbox.read_only,
+                sandbox=Sandbox.full_access,
                 approval_mode=ApprovalMode.deny_all,
-                developer_instructions="No tools. Use only supplied repository data. "
-                "Return JSON matching the supplied schema.",
+                developer_instructions="Follow applicable AGENTS.md. Use host tools as needed. "
+                "Never run local builds or compilation tests. Return the supplied JSON schema.",
             )
             result = thread.run(request["prompt"], output_schema=request["schema"])
             if str(result.status.value) != "completed" or not result.final_response:
