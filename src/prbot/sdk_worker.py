@@ -26,6 +26,10 @@ def runtime_profile(workspace, auth_home, runtime):
             "(allow sysctl-read)",
             "(allow signal (target self))",
             "(allow mach-lookup)",
+            '(allow ipc-posix-shm-read* (ipc-posix-name-prefix "apple.cfprefs."))',
+            '(allow user-preference-read (preference-domain "com.openai.codex"))',
+            '(allow file-read* (subpath "/Library/Managed Preferences") '
+            '(subpath "/Library/Preferences"))',
             "(allow network*)",
             "(allow file-read-metadata)",
             '(allow file-read* (subpath "/System") (subpath "/usr/lib") '
@@ -80,7 +84,20 @@ def run():
         )
         with Codex(config) as codex:
             if request["prompt"] == "__prbot_runtime_check__":
-                sys.stdout.write(json.dumps({"initialized": codex.metadata is not None}))
+                thread = codex.thread_start(
+                    cwd=str(workspace),
+                    ephemeral=True,
+                    sandbox=Sandbox.read_only,
+                    approval_mode=ApprovalMode.deny_all,
+                )
+                sys.stdout.write(
+                    json.dumps(
+                        {
+                            "initialized": codex.metadata is not None,
+                            "thread_started": bool(thread.id),
+                        }
+                    )
+                )
                 return
             if request["prompt"] == "__prbot_account_check__":
                 authenticated = codex.account(refresh_token=True).account is not None

@@ -90,7 +90,14 @@ def status():
         last = json.loads(path.read_text())
     except (OSError, ValueError):
         last = {}
+    from prbot.config import read_settings
+
+    selected = read_settings().get("PRBOT_WORK_ROOT")
+    workspace = (
+        str(Path(selected) / "PRBot-workspaces") if selected else str(data_dir() / "workspaces")
+    )
     return {
+        "workspace_root": workspace,
         "agent_loaded": loaded,
         "autostart": agent_path().exists(),
         "last_service_report": last,

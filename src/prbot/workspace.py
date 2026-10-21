@@ -57,8 +57,17 @@ async def git(cwd, *args, token=None):
 
 
 async def prepare(task, settings, token):
-    root = data_dir() / "workspaces"
+    root = (
+        Path(settings.workspace_root) / "PRBot-workspaces"
+        if settings.workspace_root
+        else data_dir() / "workspaces"
+    )
+    if root.is_symlink():
+        raise DeliveryError("工作路径下 PRBot-workspaces 不能是符号链接。")
     root.mkdir(mode=0o700, exist_ok=True)
+    if root.stat().st_uid != os.getuid():
+        raise DeliveryError("任务目录不属于当前用户，请重新选择工作路径。")
+    root.chmod(0o700)
     path = root / task["id"]
     if path.exists():
         raise DeliveryError("任务工作区已存在，需人工核对；未覆盖已有文件。")

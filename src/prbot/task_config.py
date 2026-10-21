@@ -2,6 +2,7 @@
 
 import os
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from prbot.config import ConfigError, read_settings
 from prbot.tasks import repository_url
@@ -32,6 +33,8 @@ class TaskConfig:
     ci_timeout: int = 3600
     required_checks: tuple = ("test", "dmg")
     local_repos: dict = field(default_factory=dict)
+
+    workspace_root: str | None = None
 
     @property
     def enabled(self):
@@ -72,8 +75,29 @@ class TaskConfig:
             local = get("PRBOT_LOCAL_REPOS", {})
             if not isinstance(local, dict):
                 raise ValueError
-            return cls(users, repos, *values, checks, local)
+            root = get("PRBOT_WORK_ROOT", None)
+            if root is not None:
+                root = validate_work_root(root)
+            return cls(users, repos, *values, checks, local, root)
         except (ValueError, TypeError):
             raise ConfigError(
                 "任务配置错误：请检查允许用户、owner/repo、正整数超时和必需检查名。"
             ) from None
+
+
+def validate_work_root(value):
+    try:
+        path = Path(value).expanduser()
+        if not path.is_absolute() or not path.is_dir() or not os.access(path, os.W_OK):
+            raise ValueError
+        return str(path.resolve())
+    except (ValueError, TypeError, OSError):
+        raise ConfigError("工作路径必须是当前用户可写的文件夹，请重新选择。") from None
+
+
+def select_work_root(value):
+    from prbot.config import save_settings
+
+    path = validate_work_root(value)
+    save_settings({"PRBOT_WORK_ROOT": path})
+    return path

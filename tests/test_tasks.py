@@ -349,7 +349,7 @@ async def test_sandboxed_sdk_runtime_initializes(tmp_path):
     from prbot.codex_adapter import CodexAdapter
 
     result = await CodexAdapter("{}").invoke(tmp_path, "__prbot_runtime_check__", {}, 30)
-    assert result == {"initialized": True}
+    assert result == {"initialized": True, "thread_started": True}
 
 
 async def test_sandbox_restricts_host_reads_and_execution(tmp_path):
@@ -381,3 +381,47 @@ async def test_sandbox_restricts_host_reads_and_execution(tmp_path):
     assert (await command("/bin/cat", str(tmp_path / "unrelated-credential")))[0] != 0
     assert (await command("/bin/sh", "-c", "echo escape"))[0] != 0
     assert Path("/usr/bin/sandbox-exec").exists()
+
+
+def test_selected_work_root_persists_and_is_reported(tmp_path):
+    from prbot import service
+    from prbot.task_config import select_work_root
+
+    selected = tmp_path / "selected"
+    selected.mkdir()
+    assert select_work_root(str(selected)) == str(selected.resolve())
+    assert TaskConfig.load().workspace_root == str(selected.resolve())
+    assert service.status()["workspace_root"] == str(selected / "PRBot-workspaces")
+
+
+def test_invalid_work_root_preserves_previous_choice(tmp_path):
+    from prbot.config import ConfigError
+    from prbot.task_config import select_work_root
+
+    select_work_root(str(tmp_path))
+    with pytest.raises(ConfigError):
+        select_work_root(str(tmp_path / "missing"))
+    assert TaskConfig.load().workspace_root == str(tmp_path.resolve())
+
+
+async def test_new_tasks_use_selected_parent_without_touching_existing_files(
+    tmp_path, settings, task, monkeypatch
+):
+    from dataclasses import replace
+
+    from prbot.workspace import prepare
+
+    selected = tmp_path / "chosen"
+    selected.mkdir()
+    original_mode = selected.stat().st_mode
+    existing = selected / "my-file"
+    existing.write_text("preserve")
+    configured = replace(settings, workspace_root=str(selected))
+    monkeypatch.setattr("prbot.workspace.git", AsyncMock(return_value="base"))
+    task["repository"] = {"default_branch": "main"}
+    path, sha = await prepare(task, configured, "token")
+    assert path == selected / "PRBot-workspaces" / task["id"]
+    assert sha == "base"
+    assert existing.read_text() == "preserve"
+    assert selected.stat().st_mode == original_mode
+    assert (selected / "PRBot-workspaces").stat().st_mode & 0o777 == 0o700

@@ -34,7 +34,7 @@ Token 不进入日志或 LaunchAgent。普通消息仅在等待任务输入的�
 
 ## /FinishIssue 仓库任务（Issue #3）
 
-新增多轮任务入口，`/id` 的使用方式不变。首次使用在应用选择“配置任务”：填写 GitHub Token、允许的 Telegram 用户 ID 和允许的仓库 `owner/repo`。凭据存入 macOS 钥匙串；允许范围等设置保存在权限为 600 的 `config.json`。Codex 复用本机已有的 Plus/ChatGPT 登录：界面选择“导入 Codex 登录”，或开发环境执行 `python -m prbot.main import-codex`。登录过期后先在 Codex 重新登录，再导入并重启 Bot。DMG 自带固定版本 SDK 和原生 Codex runtime，不要求安装 Python、pip、Node 或修改 PATH。
+新增多轮任务入口，`/id` 的使用方式不变。先在应用选择“选择工作路径”，指定统一存放任务的文件夹；新任务保存在其 `PRBot-workspaces` 子目录中。首次使用在应用选择“配置任务”：填写 GitHub Token、允许的 Telegram 用户 ID 和允许的仓库 `owner/repo`。凭据存入 macOS 钥匙串；允许范围等设置保存在权限为 600 的 `config.json`。Codex 复用本机已有的 Plus/ChatGPT 登录：界面选择“导入 Codex 登录”，或开发环境执行 `python -m prbot.main import-codex`。登录过期后先在 Codex 重新登录，再导入并重启 Bot。DMG 自带固定版本 SDK 和原生 Codex runtime，不要求安装 Python、pip、Node 或修改 PATH。
 
 1. 发送 `/FinishIssue`（大小写均可，群内可带 `@Bot用户名`）。
 2. 输入 `https://github.com/owner/repo`。

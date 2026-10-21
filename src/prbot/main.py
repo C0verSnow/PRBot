@@ -110,6 +110,10 @@ def main():
                 token = validate_token(values["telegram_token"])
                 asyncio.run(validate_api(token))
                 keychain_token(token)
+            if values.get("work_root"):
+                from prbot.task_config import select_work_root
+
+                select_work_root(values["work_root"])
             configure_tasks(values["github_token"], values["users"], values["repos"])
             print("任务凭据已保存到钥匙串，允许范围已保存；请重启服务。")
         elif args.command == "import-codex":
