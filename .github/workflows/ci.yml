@@ -50,5 +50,7 @@ jobs:
             dist/PRBot-v0.1.0-macos-arm64.dmg
             dist/SHA256SUMS
             dist/build-dependencies.txt
+            dist/PRBot-ui.png
+            dist/PRBot-ui.json
             使用手册.md
             docs/验收记录.md

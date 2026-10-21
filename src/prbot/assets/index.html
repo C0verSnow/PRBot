@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'">
+<title>PRBot</title>
+<link rel="stylesheet" href="style.css">
+<script src="app.js" defer></script>
+</head>
+<body>
+<svg class="symbols" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><defs>
+<symbol id="plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+<symbol id="project" viewBox="0 0 24 24"><path d="M4 8h16l-2 12H6L4 8ZM3 5h18M8 2h8"/></symbol>
+<symbol id="artifact" viewBox="0 0 24 24"><circle cx="8" cy="15" r="5"/><path d="m9 7 5-5 6 6-5 5M16 13h6v9h-6"/></symbol>
+<symbol id="code" viewBox="0 0 24 24"><path d="m7 6-5 6 5 6m10-12 5 6-5 6M14 3l-4 18"/></symbol>
+<symbol id="pin" viewBox="0 0 24 24"><path d="m9 3 10 10M11 5 5 11l8 8 6-6M4 20l5-5"/></symbol>
+<symbol id="chat" viewBox="0 0 24 24"><path d="M4 4h16v12H9l-5 4V4Z"/></symbol>
+<symbol id="arrow" viewBox="0 0 24 24"><path d="M12 19V5m-6 6 6-6 6 6"/></symbol>
+</defs></svg>
+<aside class="sidebar" aria-label="主导航">
+  <div class="brand"><span class="brand-mark" aria-hidden="true">◫</span> PRBot</div>
+  <nav>
+    <button class="nav-item active" data-view="New" aria-current="page"><svg><use href="#plus"/></svg>New</button>
+    <button class="nav-item" data-view="Projects"><svg><use href="#project"/></svg>Projects</button>
+    <button class="nav-item" data-view="Artifacts"><svg><use href="#artifact"/></svg>Artifacts</button>
+    <button class="nav-item" data-view="Code"><svg><use href="#code"/></svg>Code</button>
+    <div class="nav-group">
+      <button class="group-title nav-item" data-view="Pinned"><span>Pinned</span><svg><use href="#pin"/></svg></button>
+      <p class="sidebar-note">尚未固定任何项目</p>
+    </div>
+    <div class="nav-group">
+      <button class="group-title nav-item" data-view="Chats and tasks"><span>Chats and tasks</span><svg><use href="#chat"/></svg></button>
+      <p class="sidebar-note">任务回执显示在 Telegram 中</p>
+    </div>
+  </nav>
+  <button id="user" class="user" aria-haspopup="dialog"><span class="avatar" id="avatar">U</span><span id="username">用户</span><span class="user-role">设置与服务</span><span class="chevron">⌄</span></button>
+</aside>
+<main>
+  <header class="topbar"><span>你的仓库，你的下一步。</span><button id="status-button" class="status-pill"><span id="status-dot" class="dot"></span><span id="service-label">查看服务状态</span></button></header>
+  <section id="new-view" class="home" aria-labelledby="greeting">
+    <div class="greeting"><span class="spark" aria-hidden="true">✳</span><h1 id="greeting">What shall we think through?</h1></div>
+    <form id="composer" class="composer">
+      <label class="sr-only" for="draft">GitHub 仓库链接与需求</label>
+      <textarea id="draft" maxlength="3500" placeholder="粘贴 GitHub 仓库链接，描述你想完成的事…" spellcheck="false"></textarea>
+      <div class="composer-footer"><span>PRBot · 仓库任务</span><button type="submit" id="handoff" title="复制需求并打开 Telegram" aria-label="复制需求并打开 Telegram"><svg><use href="#arrow"/></svg></button></div>
+    </form>
+    <p class="handoff-note">在这里整理需求，通过 Telegram 提交。<br>点击箭头复制需求并打开 Bot，先发送 <code>/FinishIssue</code>，收到提示后粘贴。</p>
+  </section>
+  <section id="empty-view" class="empty" hidden><span class="empty-mark" aria-hidden="true">◌</span><h1 id="empty-title"></h1><p id="empty-description"></p><button class="secondary" id="back-new">整理新需求</button></section>
+  <p id="feedback" role="status" aria-live="polite"></p>
+</main>
+<dialog id="settings" aria-labelledby="settings-title">
+  <header class="settings-heading"><div><p class="eyebrow">YOUR WORKSPACE</p><h2 id="settings-title">设置与服务</h2></div><button id="close-settings" class="close" aria-label="关闭设置">×</button></header>
+  <div class="settings-scroll">
+    <section class="settings-section"><h3>工作空间</h3><p id="workspace">选择任务的统一工作路径。</p><div class="actions"><button data-action="选择工作路径">选择工作路径</button><button data-action="打开配置目录">打开配置目录</button></div><p class="help">首次选择会准备 .env。保存后重启服务；现有任务不搬动。</p></section>
+    <section class="settings-section"><h3>连接与权限</h3><p>凭据通过系统隐藏输入框填写并保存在钥匙串中，此页面不显示凭据。</p><div class="actions"><button data-action="配置 Token">Telegram Token</button><button data-action="配置任务">GitHub 与允许范围</button><button data-action="导入 Codex 登录">导入 Codex 登录</button></div><p class="help">.env 的配置优先于界面保存值。任务配置包含 GitHub Token、允许用户与仓库；同时导入当前 Codex 登录。</p></section>
+    <section class="settings-section"><h3>后台服务</h3><p id="service-detail">正在读取状态…</p><div class="actions"><button data-action="启动服务">启动</button><button data-action="停止服务">停止</button><button data-action="重启服务">重启</button><button data-action="查看状态">查看完整状态</button></div><p class="help">启动操作完成后仍需等待后台检查；停止会移除登录自启动。关闭窗口不停止服务。</p></section>
+    <section class="settings-section"><h3>登录自启动</h3><p id="autostart">正在读取状态…</p><div class="actions"><button data-action="开启登录自启动">开启</button><button data-action="关闭登录自启动">关闭</button></div><p class="help">更改此设置会重新注册并启动后台服务。</p></section>
+  </div>
+  <footer id="settings-feedback" role="status" aria-live="polite">操作结果将在这里显示。</footer>
+</dialog>
+</body>
+</html>

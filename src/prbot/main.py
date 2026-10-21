@@ -74,6 +74,7 @@ def main():
         default="ui",
         choices=[
             "ui",
+            "ui-check",
             "run",
             "start",
             "stop",
@@ -123,6 +124,17 @@ def main():
             print("现有 Codex 登录已导入钥匙串，请重启服务。")
         elif args.command == "version":
             print(__version__)
+        elif args.command == "ui-check":
+            from pathlib import Path
+
+            from prbot.desktop import show
+
+            if os.environ.get("CI") != "true" or not os.environ.get("PRBOT_UI_CHECK_OUTPUT"):
+                raise ConfigError("界面检查只允许在远端 CI 中运行。")
+            output = Path(os.environ["PRBOT_UI_CHECK_OUTPUT"])
+            show(check_output=output)
+            if not json.loads(output.with_suffix(".json").read_text()).get("ok"):
+                raise ConfigError("安装包界面检查失败，请检查远端产物。")
         elif args.command == "ui":
             from prbot.ui import show
 

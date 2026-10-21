@@ -48,5 +48,9 @@ env -i HOME="$TEST_HOME" PATH=/usr/bin:/bin "$BIN" status > "$TEST_HOME/env-stat
 /usr/bin/grep -q 'PRBot-workspaces/.env' "$TEST_HOME/env-status.json"
 env -i HOME="$TEST_HOME" PATH=/usr/bin:/bin "$BIN" sdk-check > "$TEST_HOME/sdk-check.json"
 /usr/bin/grep -q '"initialized": true' "$TEST_HOME/sdk-check.json"
+# Real bundled WebKit load + native message bridge + navigation/settings + rendered screenshot.
+# This uses a dummy config and does not start services or call Telegram.
+env -i HOME="$TEST_HOME" PATH=/usr/bin:/bin CI=true \
+  PRBOT_UI_CHECK_OUTPUT="$PWD/dist/PRBot-ui.png" "$BIN" ui-check
 codesign --verify --deep --strict "$TEST_HOME/PRBot.app"
 echo 'DMG mount/copy + embedded runtime + workspace env configuration halt: passed'
