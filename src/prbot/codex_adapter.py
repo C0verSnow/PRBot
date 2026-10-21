@@ -83,12 +83,12 @@ class CodexAdapter:
             cwd=path,
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.PIPE,
             start_new_session=True,
         )
         try:
             async with asyncio.timeout(timeout):
-                out, _ = await proc.communicate(
+                out, diagnostic = await proc.communicate(
                     json.dumps(
                         {
                             "auth": self.auth,
@@ -99,6 +99,8 @@ class CodexAdapter:
                     ).encode()
                 )
             if proc.returncode:
+                if prompt == "__prbot_runtime_check__":
+                    raise DeliveryError(diagnostic.decode(errors="replace")[-3000:])
                 raise DeliveryError("Codex SDK 执行失败，请检查 Plus 登录状态、额度和运行时。")
             response = json.loads(out)
             if prompt == "__prbot_runtime_check__":

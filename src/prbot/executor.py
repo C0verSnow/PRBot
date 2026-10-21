@@ -114,7 +114,7 @@ class Executor:
                 f"/repos/{task['repo']}/pulls/{pr['number']}",
                 json={"body": self.body(task)},
             )
-            await self.github.ready(task["repo"], pr["number"])
+            await self.github.ready(task["repo"], pr["number"], task["commit_sha"])
             source = task["source"]
             if source["kind"] == "issue" and source.get("number"):
                 result = await self.github.close_issue(task["repo"], source["number"])

@@ -15,7 +15,7 @@ def run():
     workspace = Path(request["path"]).resolve()
     runtime = str(bundled_codex_path().resolve())
     with tempfile.TemporaryDirectory(prefix="prbot-sdk-") as private:
-        auth_home = Path(private)
+        auth_home = Path(private).resolve()
         os.chmod(private, 0o700)
         auth = auth_home / "auth.json"
         auth.write_text(request["auth"])
@@ -28,6 +28,7 @@ def run():
                 "(allow process-fork)",
                 f"(allow process-exec (literal {json.dumps(runtime)}))",
                 "(allow sysctl-read)",
+                "(allow signal (target self))",
                 "(allow mach-lookup)",
                 "(allow network*)",
                 "(allow file-read-metadata)",

@@ -103,8 +103,10 @@ class GitHub:
             raise DeliveryError("远端必需检查失败；请打开 PR 的 Checks 排查，未报告完成。")
         return all(values.get(k) == "success" for k in required)
 
-    async def ready(self, repo, number):
+    async def ready(self, repo, number, expected_sha=None):
         pr = await self.request("GET", f"/repos/{repo}/pulls/{number}")
+        if expected_sha and pr["head"]["sha"] != expected_sha:
+            raise DeliveryError("PR 代码已被修改，需重新验证；未报告完成。")
         if not pr["draft"]:
             return
         try:
