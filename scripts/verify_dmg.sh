@@ -28,14 +28,19 @@ mkdir -p "$TEST_HOME/PRBot-workspaces"
 /usr/bin/plutil -insert PRBOT_WORK_ROOT -string "$TEST_HOME" \
   "$TEST_HOME/Library/Application Support/PRBot/config.json"
 chmod 600 "$TEST_HOME/Library/Application Support/PRBot/config.json"
-echo 'TELEGRAM_BOT_TOKEN=bad' > "$TEST_HOME/PRBot-workspaces/.env"
+# A format-valid dummy token plus an invalid log level fails before any API request.
+# Checking the distinct log-level error proves .env was actually read.
+cat > "$TEST_HOME/PRBot-workspaces/.env" <<'ENV'
+TELEGRAM_BOT_TOKEN=123456:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+PRBOT_LOG_LEVEL=TRACE
+ENV
 chmod 600 "$TEST_HOME/PRBot-workspaces/.env"
 env -i HOME="$TEST_HOME" PATH=/usr/bin:/bin "$BIN" run
 /usr/bin/grep -q 'halted' "$STATUS"
-/usr/bin/grep -q 'Token' "$STATUS"
+/usr/bin/grep -q 'PRBOT_LOG_LEVEL' "$STATUS"
 env -i HOME="$TEST_HOME" PATH=/usr/bin:/bin "$BIN" status > "$TEST_HOME/env-status.json"
 /usr/bin/grep -q 'PRBot-workspaces/.env' "$TEST_HOME/env-status.json"
 env -i HOME="$TEST_HOME" PATH=/usr/bin:/bin "$BIN" sdk-check > "$TEST_HOME/sdk-check.json"
 /usr/bin/grep -q '"initialized": true' "$TEST_HOME/sdk-check.json"
 codesign --verify --deep --strict "$TEST_HOME/PRBot.app"
-echo 'DMG mount/copy + embedded runtime + invalid configuration halt: passed'
+echo 'DMG mount/copy + embedded runtime + workspace env configuration halt: passed'
