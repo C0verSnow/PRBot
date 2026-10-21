@@ -31,3 +31,9 @@ Token 不进入日志或 LaunchAgent。普通消息和发给其他 Bot 的命令
 禁止在本地执行编译、打包或可能触发编译的验证。本仓库在 feature 分支 push、PR 或手动触发 Actions 时，远端安装依赖、静态检查、pytest、构建 DMG，并检查挂载复制后的独立运行时。不要在本地运行 `build_dmg.sh` 或 `verify_dmg.sh`。
 
 构建链参考 [PyInstaller](https://pyinstaller.org/en/stable/spec-files.html)；Telegram 使用 [Bot API 长轮询](https://core.telegram.org/bots/api#getupdates) 和 [python-telegram-bot](https://docs.python-telegram-bot.org/en/stable/telegram.bot.html)。
+
+## Issue #5 验收文件
+
+[Issue #5](https://github.com/C0verSnow/PRBot/issues/5) 的验收文件为仓库根目录的 [test_issue.md](test_issue.md)，内容为 `issue done`（允许末尾一个换行）。本次仅新增该文件并更新相关文档，不改变 Bot 功能。过程记录见 [tasklist.md](tasklist.md)，验收步骤见 [使用手册](使用手册.md#issue-5-验收步骤)。
+
+提交后创建待审 PR，使用已有 **Test and build macOS DMG** 远端流程验证对应提交；全部检查通过后独立关闭 Issue #5，不自动合并 PR。当前文件替换未执行远端 CI，也未创建 PR 或关闭 Issue。
