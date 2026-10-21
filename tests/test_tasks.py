@@ -425,3 +425,16 @@ async def test_new_tasks_use_selected_parent_without_touching_existing_files(
     assert existing.read_text() == "preserve"
     assert selected.stat().st_mode == original_mode
     assert (selected / "PRBot-workspaces").stat().st_mode & 0o777 == 0o700
+
+
+async def test_independent_review_receives_associated_issue_context(tmp_path):
+    from prbot.codex_adapter import CodexAdapter
+
+    adapter = CodexAdapter("{}")
+    adapter.invoke = AsyncMock(return_value={"passed": True, "reason": "covered"})
+    context = {"number": 5, "body": "Create test_issue.md containing issue done"}
+    await adapter.review(
+        tmp_path, {"requirement": "Complete associated issue", "context": context}, "diff", 30
+    )
+    prompt = json.loads(adapter.invoke.call_args.args[1])
+    assert prompt["associated_context"] == context

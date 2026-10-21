@@ -157,6 +157,7 @@ class CodexAdapter:
                 "Do not execute tools. Fail if anything required is missing. "
                 "This is a static delivery review; CI separately runs required checks.",
                 "requirement": task["requirement"],
+                "associated_context": task.get("context"),
                 "diff": diff,
                 "repository_context": snapshot(path),
             },
