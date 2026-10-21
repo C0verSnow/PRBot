@@ -5,6 +5,7 @@ import time
 
 from telegram.error import BadRequest, Forbidden, TelegramError
 
+from prbot.codex_adapter import parent_rules
 from prbot.github import DeliveryError
 from prbot.workspace import apply_edits, git, inspect_diff, prepare
 
@@ -56,7 +57,10 @@ class Executor:
             self.store.change(tid, stage, repository=repository, read_at=time.time())
             task = self.store.get(tid)
             path, sha = await prepare(task, self.settings, self.token)
-            self.store.change(tid, stage, workspace=str(path), base_sha=sha)
+            self.store.change(
+                tid, stage, workspace=str(path), base_sha=sha, parent_rules=parent_rules(path)
+            )
+            task = self.store.get(tid)
             proposal = await self.codex.execute(path, task, self.settings.timeout)
             if proposal["clarification"]:
                 raise DeliveryError("需要澄清：" + proposal["clarification"][:1000])

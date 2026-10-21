@@ -9,6 +9,7 @@ import json
 import os
 import signal
 import sys
+import time
 from pathlib import Path
 
 from prbot.github import DeliveryError
@@ -150,13 +151,15 @@ class CodexAdapter:
             {
                 "instruction": "Implement the requirement by returning complete file replacements. "
                 "Use null content to delete. Read and obey all supplied AGENTS.md. "
-                "Update README, manual and tasklist.md with Unix timestamps. "
+                "Update README, manual and tasklist.md. Each tasklist record must "
+                "contain the supplied current_unix_time, preserving existing timestamps. "
                 "Never run commands, builds, tests, Git or credential access. "
                 "Return a specific clarification and no edits if requirements conflict "
                 "or are insufficient. Keep edits strictly related to the requirement.",
                 "task": task["requirement"],
                 "associated_context": task.get("context"),
-                "applicable_parent_rules": parent_rules(path),
+                "applicable_parent_rules": task.get("parent_rules", parent_rules(path)),
+                "current_unix_time": int(time.time()),
                 "repository_context": snapshot(path),
             },
             ensure_ascii=False,
@@ -172,7 +175,8 @@ class CodexAdapter:
                 "This is a static delivery review; CI separately runs required checks.",
                 "requirement": task["requirement"],
                 "associated_context": task.get("context"),
-                "applicable_parent_rules": parent_rules(path),
+                "applicable_parent_rules": task.get("parent_rules", parent_rules(path)),
+                "current_unix_time": int(time.time()),
                 "diff": diff,
                 "repository_context": snapshot(path),
             },

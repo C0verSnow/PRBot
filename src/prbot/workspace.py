@@ -143,6 +143,16 @@ async def inspect_diff(path, task, secrets=()):
         raise DeliveryError("差异包含执行凭据，已停止交付。")
     if not any(name.lower().endswith(".md") for name in names):
         raise DeliveryError("交付缺少文档更新。")
+    rules = "\n".join(item["instructions"] for item in task.get("parent_rules", []))
+    if "4象限" in rules or "四象限" in rules:
+        log = path / "tasklist.md"
+        body = log.read_text() if log.is_file() else ""
+        headings = ("## 想做：", "## 做完：", "## 没做：", "## 在做：")
+        records = [line.strip() for line in body.splitlines() if line.strip().startswith("- ")]
+        if not all(heading in body for heading in headings) or any(
+            not re.search(r"\b[0-9]{9,11}\b", line) for line in records
+        ):
+            raise DeliveryError("tasklist.md 不符合仓库四象限和每条记录带 Unix 时间戳的约定。")
     requirement = task["requirement"]
     if "test.md" in requirement and "test done" in requirement:
         target = path / "test.md"
