@@ -17,6 +17,8 @@ def configure(level):
     )
     handler.setFormatter(Redactor("%(asctime)s %(levelname)s %(message)s"))
     root = logging.getLogger()
+    for previous in root.handlers:
+        previous.close()
     root.handlers[:] = [handler]
     root.setLevel(level)
     # HTTP request URLs contain credentials; never emit third-party request details.

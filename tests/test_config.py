@@ -67,3 +67,11 @@ def test_corrupt_settings():
     path.chmod(0o600)
     with pytest.raises(ConfigError):
         Config.load()
+
+
+@pytest.mark.parametrize("value", [123456, True, ["invalid"], {"bad": "token"}])
+def test_non_string_token_is_configuration_error(value):
+    from prbot.config import validate_token
+
+    with pytest.raises(ConfigError):
+        validate_token(value)

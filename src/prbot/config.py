@@ -11,7 +11,7 @@ class ConfigError(Exception):
 
 
 def validate_token(token: str) -> str:
-    if not re.fullmatch(r"[0-9]{5,20}:[A-Za-z0-9_-]{30,100}", token):
+    if not isinstance(token, str) or not re.fullmatch(r"[0-9]{5,20}:[A-Za-z0-9_-]{30,100}", token):
         raise ConfigError("Token 缺失或格式错误，请在 PRBot 中配置 BotFather 提供的 Token。")
     return token
 

@@ -13,7 +13,7 @@ hdiutil verify dist/PRBot-v0.1.0-macos-arm64.dmg
 ditto "$MOUNT/PRBot.app" "$TEST_HOME/PRBot.app"
 BIN="$TEST_HOME/PRBot.app/Contents/MacOS/PRBot"
 # Run with an empty HOME and without source PYTHONPATH or an external Python PATH.
-# A blank Token is intentionally passed so this check never accesses a real credential.
+# An invalid Token is intentionally passed so this check never accesses a real credential.
 VERSION="$(env -i HOME="$TEST_HOME" PATH=/usr/bin:/bin "$BIN" version)"
 [[ "$VERSION" == "0.1.0" ]]
 env -i HOME="$TEST_HOME" PATH=/usr/bin:/bin TELEGRAM_BOT_TOKEN=bad "$BIN" run
