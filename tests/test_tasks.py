@@ -227,3 +227,41 @@ async def test_redis_pagination_orders_messages_and_exposes_cursor():
     page = await store.history("conversation", "4")
     assert page["cursor"] == "11"
     assert [m["message_id"] for m in page["messages"]] == ["a", "b"]
+
+
+async def test_two_runners_do_not_execute_the_same_task(app):
+    await submit(app)
+    entered, release = asyncio.Event(), asyncio.Event()
+
+    async def run_once(*args):
+        entered.set()
+        await release.wait()
+        return {"summary": "done", "outcome": "completed", "pr_url": "", "validation": "passed"}
+
+    app.adapter.invoke.side_effect = run_once
+    stop = asyncio.Event()
+    other = ConversationService(archive=app.archive, adapter=app.adapter, values={})
+    runners = [asyncio.create_task(service.run(stop)) for service in (app, other)]
+    await asyncio.wait_for(entered.wait(), 2)
+    await asyncio.sleep(0.6)
+    assert app.adapter.invoke.await_count == 1
+    release.set()
+    await asyncio.sleep(0.1)
+    stop.set()
+    await asyncio.gather(*runners)
+    assert app.request("request-123")["status"] == "completed"
+
+
+async def test_orphaned_claim_is_interrupted_even_when_pid_has_been_reused(app):
+    import os
+
+    await submit(app)
+    with app.db() as db:
+        db.execute("UPDATE requests SET status='running',pid=?", (os.getpid(),))
+    stop = asyncio.Event()
+    runner = asyncio.create_task(app.run(stop))
+    await asyncio.sleep(0.1)
+    stop.set()
+    await runner
+    assert app.request("request-123")["status"] == "interrupted"
+    app.adapter.invoke.assert_not_awaited()

@@ -1,10 +1,10 @@
 export const views = ['Issue', 'Pull Request'] as const;
 export type View = typeof views[number];
-export type Action = 'ready' | 'choose_workspace' | 'open_configuration' | 'start_service'
+export type Action = 'ready' | 'refresh_service' | 'choose_workspace' | 'open_configuration' | 'start_service'
   | 'stop_service' | 'connections' | 'use_id_token' | 'submit_message' | 'history' | 'tasks' | 'retry_save';
 export interface Draft { link: string; text: string; request_id: string }
 export interface ServiceStatus {
-  user?: string; loaded?: boolean; state: string; reported_at?: number;
+  user?: string; loaded?: boolean; state: string; reported_at?: number; control_verified?: boolean; detail?: string;
   workspace?: string; configuration?: string;
 }
 export interface Task {

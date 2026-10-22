@@ -5,6 +5,7 @@ alone owns repository edits and delivery; no second controller commits its work.
 """
 
 import asyncio
+import fcntl
 import hashlib
 import json
 import os
@@ -361,34 +362,40 @@ class ConversationService:
             await github.close()
 
     async def run(self, stop):
-        while not stop.is_set():
-            with self.db() as db:
-                db.execute("BEGIN IMMEDIATE")
-                # Dead process claims become Interrupted, never silently re-executed.
-                for row in db.execute("SELECT id,pid FROM requests WHERE status='running'"):
-                    try:
-                        os.kill(row["pid"], 0)
-                    except (ProcessLookupError, TypeError):
-                        db.execute(
-                            "UPDATE requests SET status='interrupted',result=? WHERE id=?",
-                            ("Interrupted. Review repository state before retrying.", row["id"]),
-                        )
-                row = db.execute(
-                    "SELECT * FROM requests WHERE status='queued' "
-                    "AND NOT EXISTS (SELECT 1 FROM requests WHERE status='running') "
-                    "ORDER BY created LIMIT 1"
-                ).fetchone()
-                claimed = (
-                    row
-                    and db.execute(
-                        "UPDATE requests SET status='running',pid=? WHERE id=? AND status='queued'",
-                        (os.getpid(), row["id"]),
-                    ).rowcount
-                )
-            if claimed:
-                await self.execute(dict(row))
-            else:
+        # A kernel lock is released on process exit; unlike PID-only ownership it
+        # cannot mistake a reused PID after reboot for a still-running SDK task.
+        with open(data_dir() / "workbench-execution.lock", "a") as lock:
+            while not stop.is_set():
                 try:
-                    await asyncio.wait_for(stop.wait(), 0.5)
-                except TimeoutError:
-                    pass
+                    fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                except BlockingIOError:
+                    try:
+                        await asyncio.wait_for(stop.wait(), 0.5)
+                    except TimeoutError:
+                        pass
+                    continue
+                try:
+                    with self.db() as db:
+                        db.execute("BEGIN IMMEDIATE")
+                        db.execute(
+                            "UPDATE requests SET status='interrupted',result=? "
+                            "WHERE status='running'",
+                            ("Interrupted. Review repository state before retrying.",),
+                        )
+                        row = db.execute(
+                            "SELECT * FROM requests WHERE status='queued' ORDER BY created LIMIT 1"
+                        ).fetchone()
+                        if row:
+                            db.execute(
+                                "UPDATE requests SET status='running',pid=? WHERE id=?",
+                                (os.getpid(), row["id"]),
+                            )
+                    if row:
+                        await self.execute(dict(row))
+                finally:
+                    fcntl.flock(lock, fcntl.LOCK_UN)
+                if not row:
+                    try:
+                        await asyncio.wait_for(stop.wait(), 0.5)
+                    except TimeoutError:
+                        pass

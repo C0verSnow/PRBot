@@ -83,6 +83,7 @@ def show(check_output=None):
 
     class Bridge(NSObject):
         busy = False
+        control_verified_at = 0
 
         @objc.python_method
         def deliver(self, message=None, ok=True, extra=None):
@@ -103,6 +104,8 @@ def show(check_output=None):
                     "loaded": loaded,
                     "state": health,
                     "reported_at": report.get("time"),
+                    "control_verified": time.time() - self.control_verified_at < 10,
+                    "detail": report.get("detail", ""),
                     "workspace": state["workspace_root"],
                     "configuration": str(env_path().parent),
                 }
@@ -121,6 +124,7 @@ def show(check_output=None):
             body = message.body()
             allowed = ACTIONS | {
                 "ready",
+                "refresh_service",
                 "submit_message",
                 "history",
                 "connections",
@@ -136,6 +140,12 @@ def show(check_output=None):
                 self.deliver("Unsupported request.", False)
                 return
             action = body.get("action")
+            if action == "refresh_service":
+                import time
+
+                self.control_verified_at = time.time()
+                self.deliver("Service process status verified.")
+                return
             if action == "ready":
                 self.deliver()
                 return
