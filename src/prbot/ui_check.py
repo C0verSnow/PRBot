@@ -11,6 +11,7 @@ def schedule_check(web, output):
 
     finished = False
     interaction_error = None
+    minimum = False
 
     def finish(ok, detail):
         nonlocal finished
@@ -28,11 +29,43 @@ def schedule_check(web, output):
             return
         bitmap = AppKit.NSBitmapImageRep.imageRepWithData_(image.TIFFRepresentation())
         data = bitmap.representationUsingType_properties_(AppKit.NSBitmapImageFileTypePNG, {})
-        ok = bool(data.writeToFile_atomically_(str(output), True))
+        destination = output.with_name(output.stem + "-minimum.png") if minimum else output
+        ok = bool(data.writeToFile_atomically_(str(destination), True))
+        if ok and interaction_error is None and not minimum:
+            check_minimum()
+            return
         finish(
             ok and interaction_error is None,
-            interaction_error
-            or "React DOM, navigation, settings, native bridge and snapshot checked",
+            interaction_error or "Native bridge, drafts, settings, focus and two sizes checked",
+        )
+
+    def check_minimum():
+        nonlocal minimum
+        minimum = True
+        web.window().setContentSize_((760, 580))
+        AppHelper.callLater(0.25, inspect_minimum)
+
+    def inspect_minimum():
+        web.evaluateJavaScript_completionHandler_(
+            """
+(async () => {
+  const assert = (value, message) => { if (!value) throw new Error(message); };
+  document.getElementById('user').click();
+  await new Promise(resolve => setTimeout(resolve, 80));
+  const bounds = document.getElementById('settings').getBoundingClientRect();
+  assert(bounds.left >= 15 && bounds.right <= innerWidth - 15, 'Minimum settings width');
+  assert(bounds.top >= 15 && bounds.bottom <= innerHeight - 15, 'Minimum settings height');
+  for (const button of document.querySelectorAll('.workspace-row button')) {
+    const rect = button.getBoundingClientRect();
+    assert(rect.right < bounds.right && rect.bottom < bounds.bottom, 'Clipped workspace button');
+  }
+  const close = document.getElementById('close-settings').getBoundingClientRect();
+  assert(close.top >= 0 && close.right < innerWidth, 'Close settings button clipped');
+  window.__uiCheckResult = 'ok';
+})().catch(error => { window.__uiCheckResult = 'failed:' + error.message; });
+true;
+""",
+            lambda result, error: poll_result(),
         )
 
     def checked(result, error):

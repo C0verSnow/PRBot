@@ -8,6 +8,7 @@ def isolated_home(tmp_path, monkeypatch):
     monkeypatch.setattr("prbot.config.env_path", lambda: tmp_path / ".env")
     monkeypatch.setattr("prbot.secrets._cache", None)
     monkeypatch.setattr("prbot.execution_setup._override", None)
+    monkeypatch.setattr("prbot.execution_setup._session_auth", None)
     for key in ("TELEGRAM_BOT_TOKEN", "PRBOT_LOG_LEVEL", "PRBOT_POLL_TIMEOUT", "PRBOT_AUTOSTART"):
         monkeypatch.delenv(key, raising=False)
 

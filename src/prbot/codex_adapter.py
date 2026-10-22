@@ -121,7 +121,10 @@ class CodexAdapter:
         env = {**os.environ, "LANG": "en_US.UTF-8"}
         # Operational secrets belong to the backend, never the SDK process environment.
         for key in list(env):
-            if key.startswith(("INFISICAL_", "UPSTASH_")) or key == "TELEGRAM_BOT_TOKEN":
+            if (
+                key.startswith(("INFISICAL_", "UPSTASH_", "PRBOT_ACCEPTANCE_"))
+                or key == "TELEGRAM_BOT_TOKEN"
+            ):
                 env.pop(key)
         env.update(self.environment)
         env["PATH"] = "/opt/homebrew/bin:/usr/local/bin:" + env.get("PATH", "/usr/bin:/bin")
@@ -165,6 +168,9 @@ class CodexAdapter:
             if prompt == "__prbot_account_check__" and not response["result"].get("authenticated"):
                 return response["result"]
             if updated != original_auth and self.auth == original_auth:
+                from prbot.execution_setup import retain_refreshed_login
+
+                retain_refreshed_login(original_auth, updated)
                 self.auth = updated
             return response["result"]
         except (ValueError, UnicodeError, KeyError, TypeError):

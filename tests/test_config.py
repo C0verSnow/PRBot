@@ -105,7 +105,9 @@ def test_env_directory_rejects_symlinks(tmp_path):
     assert not (external / ".env").exists()
 
 
-@pytest.mark.parametrize("content", [None, "{broken", "{}", '{"tokens":{"id_token":"x"}}'])
+@pytest.mark.parametrize(
+    "content", [None, "{broken", "{}", '{"tokens":null}', '{"tokens":{"id_token":"x"}}']
+)
 def test_bad_codex_login_has_actionable_feedback(tmp_path, content, monkeypatch):
     monkeypatch.setattr("prbot.execution_setup._override", None)
     if content is not None:
@@ -162,3 +164,22 @@ def test_infisical_requests_are_scoped_and_failure_never_echoes_credentials(monk
     with pytest.raises(ConfigError) as error:
         secrets.load_secrets(refresh=True)
     assert "private-secret" not in str(error.value)
+
+
+def test_refreshed_login_retained_without_overwriting_manual_id(tmp_path, monkeypatch):
+    from prbot.execution_setup import retain_refreshed_login
+
+    folder = tmp_path / ".codex"
+    folder.mkdir()
+    path = folder / "auth.json"
+    original = json.dumps({"tokens": {"id_token": "original-id", "access_token": "old-access"}})
+    refreshed = json.dumps({"tokens": {"id_token": "original-id", "access_token": "new-access"}})
+    path.write_text(original)
+    retain_refreshed_login(original, refreshed)
+    assert json.loads(codex_login())["tokens"]["access_token"] == "new-access"
+    codex_login("manual-id")
+    modified = json.dumps({"tokens": {"id_token": "manual-id", "access_token": "next-access"}})
+    retain_refreshed_login(refreshed, modified)
+    assert json.loads(codex_login())["tokens"]["id_token"] == "manual-id"
+    assert json.loads(codex_login())["tokens"]["access_token"] == "next-access"
+    assert path.read_text() == refreshed

@@ -31,7 +31,13 @@ export function App() {
       setCursors(previous => ({ ...previous, [page.mode]: page.cursor }));
     }
   }, [result.history]);
-  useEffect(() => { send('history', { mode: view }); }, [view, send]);
+  const requestedHistory = useRef<View | null>(null);
+  useEffect(() => {
+    if (!busy && requestedHistory.current !== view) {
+      requestedHistory.current = view;
+      send('history', { mode: view });
+    }
+  }, [view, busy, send]);
   useEffect(() => { const timer = window.setInterval(() => { if (!busy) send('tasks'); }, 4000); return () => clearInterval(timer); }, [send, busy]);
   const tasks = result.tasks?.filter(task => task.mode === view) || [];
   return <div className="flex min-h-screen bg-canvas text-ink">

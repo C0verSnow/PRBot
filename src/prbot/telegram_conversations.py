@@ -10,6 +10,41 @@ class TelegramConversations:
     def __init__(self, application):
         self.application = application
 
+    def scope(self, update):
+        message = update.message
+        actor = str(message.from_user.id) if message.from_user else "unknown"
+        return f"{message.chat.id}:{actor}:{message.message_thread_id or 0}"
+
+    async def archive_update(self, update, reply=None):
+        message = update.message
+        if not message or not message.from_user:
+            return
+        scope = self.scope(update)
+        with self.application.db() as db:
+            row = db.execute("SELECT mode FROM channel_sessions WHERE scope=?", (scope,)).fetchone()
+        mode = row["mode"] if row else "Issue"
+        if "/pull/" in (message.text or ""):
+            mode = "Pull Request"
+        existing = self.application.request(f"telegram:{update.update_id}")
+        if existing:
+            mode = existing["mode"]
+        cid = self.application.conversation(scope, "telegram", mode)
+        now = time.time()
+        await self.application.archive.save(
+            {
+                "conversation_id": cid,
+                "message_id": f"telegram:{update.update_id}:" + ("reply" if reply else "user"),
+                "source": "telegram",
+                "actor_id": scope,
+                "role": "assistant" if reply else "user",
+                "content": self.application.clean(reply if reply else message.text or ""),
+                "created_at": now,
+                "delivery_status": "saved",
+                "task_id": f"telegram:{update.update_id}",
+                "sequence": now,
+            }
+        )
+
     async def handle_async(self, update, command=None):
         message = update.message
         if not message.from_user:
@@ -90,7 +125,7 @@ async def send_results(application, bot, stop):
             rows = db.execute(
                 "SELECT r.* FROM requests r LEFT JOIN delivered_results d "
                 "ON r.id=d.id WHERE r.source='telegram' AND r.status IN "
-                "('completed','failed','interrupted','save_pending') AND "
+                "('completed','failed','interrupted','save_pending','needs_clarification') AND "
                 "(d.id IS NULL OR (d.status='pending' AND d.attempts<5))"
             ).fetchall()
         for row in rows:

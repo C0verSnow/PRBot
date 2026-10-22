@@ -59,6 +59,7 @@ def install():
     path.write_bytes(plistlib.dumps(spec))
     path.chmod(0o600)
     try:
+        report("starting", "Waiting for the background health check.")
         launchctl("bootstrap", domain(), str(path))
     except ConfigError:
         path.unlink(missing_ok=True)
@@ -73,6 +74,7 @@ def stop():
     if launchctl("print", f"{domain()}/{LABEL}", check=False).returncode == 0:
         raise ConfigError("Background service did not stop. Check current user permissions.")
     agent_path().unlink(missing_ok=True)
+    report("stopped", "Service stopped.")
 
 
 def report(state, detail):

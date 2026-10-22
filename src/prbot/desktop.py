@@ -93,7 +93,9 @@ def show(check_output=None):
                 import time
 
                 loaded = bool(state["agent_loaded"])
-                health = report.get("state", "unknown") if loaded else "stopped"
+                health = report.get("state", "unknown")
+                if not loaded and health not in {"halted", "crashed"}:
+                    health = "stopped"
                 if loaded and time.time() - report.get("time", 0) > 15:
                     health = "stale"
                 payload["status"] = {

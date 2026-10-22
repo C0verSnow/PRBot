@@ -83,6 +83,7 @@ def main():
             "version",
             "sdk-worker",
             "sdk-check",
+            "provider-check",
         ],
     )
     args = parser.parse_args()
@@ -91,6 +92,10 @@ def main():
             from prbot.sdk_worker import run as sdk_run
 
             sdk_run()
+        elif args.command == "provider-check":
+            from prbot.provider_check import run as provider_check
+
+            provider_check()
         elif args.command == "sdk-check":
             from prbot.codex_adapter import CodexAdapter
 

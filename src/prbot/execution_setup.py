@@ -8,13 +8,19 @@ from prbot.config import ConfigError
 
 _lock = threading.Lock()
 _override = None
+_session_auth = None
 
 
 def codex_login(id_token=None):
-    global _override
+    global _override, _session_auth
     with _lock:
         try:
-            auth = json.loads((Path.home() / ".codex/auth.json").read_text())
+            original = (Path.home() / ".codex/auth.json").read_text()
+            auth = json.loads(original)
+            if _session_auth and _session_auth[0] == original:
+                auth = json.loads(_session_auth[1])
+            if not isinstance(auth, dict) or not isinstance(auth.get("tokens"), dict):
+                raise ValueError
             tokens = auth["tokens"]
             if not isinstance(tokens.get("id_token"), str) or not tokens["id_token"].strip():
                 raise ValueError
@@ -59,3 +65,43 @@ def github_token(values):
             "GitHub sign-in unavailable. Sign in with Git on this Mac or add "
             "GITHUB_TOKEN in Infisical, then retry."
         ) from None
+
+
+def retain_refreshed_login(original, updated):
+    """Keep SDK refreshes across tasks; atomically update an unchanged native sign-in.
+
+    Manual ID edits never overwrite auth.json. A concurrent Codex login wins.
+    """
+    global _session_auth
+    import os
+    import tempfile
+
+    with _lock:
+        path = Path.home() / ".codex/auth.json"
+        try:
+            current = path.read_text()
+            native = json.loads(current)
+            original_value = json.loads(original)
+            updated_value = json.loads(updated)
+            if not updated_value.get("tokens", {}).get("access_token"):
+                return
+            if _override:
+                _session_auth = (current, updated)
+                return
+            if native != original_value:
+                return
+            fd, temporary = tempfile.mkstemp(prefix=".prbot-auth-", dir=path.parent)
+            try:
+                with os.fdopen(fd, "w") as output:
+                    output.write(updated)
+                    output.flush()
+                    os.fsync(output.fileno())
+                # Preserve a newer login written while the SDK was running.
+                if path.read_text() == current:
+                    os.replace(temporary, path)
+            finally:
+                Path(temporary).unlink(missing_ok=True)
+        except (OSError, ValueError, TypeError):
+            raise ConfigError(
+                "Codex sign-in refresh could not be retained. Sign in again."
+            ) from None

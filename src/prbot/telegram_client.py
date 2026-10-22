@@ -72,6 +72,9 @@ class Receiver:
             )
         self.state.mark(uid, "processing")
         try:
+            archive = getattr(self.router.conversations, "archive_update", None)
+            if archive:
+                await archive(update)
             store = TaskStore(self.state)
             reply = store.reply(uid)
             if reply is None:
@@ -87,6 +90,11 @@ class Receiver:
         if reply is None:
             self.state.mark(uid, "ignored", advance=True)
             return
+        if archive:
+            try:
+                await archive(update, reply)
+            except Exception:
+                raise NetworkError("Message not saved. Retry.") from None
         self.state.mark(uid, "response_pending", attempt=True)
         log.info("Command received; preparing reply")
         try:

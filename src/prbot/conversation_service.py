@@ -234,6 +234,17 @@ class ConversationService:
             path = root / ("task-" + hashlib.sha256(tid.encode()).hexdigest()[:20])
             path.mkdir(exist_ok=True)
             payload = json.loads(row["payload"])
+            history = []
+            if not self.adapter:
+                cursor = "0"
+                while True:
+                    page = await self.archive.history(row["conversation"], cursor)
+                    history.extend(page["messages"])
+                    cursor = page["cursor"]
+                    if cursor == "0":
+                        break
+                history.sort(key=lambda message: message["sequence"])
+                history = history[-20:]
             # The SDK owns GitHub auth via host gh/git credentials (or Infisical GITHUB_TOKEN).
             if self.adapter:
                 adapter = self.adapter
@@ -270,6 +281,7 @@ class ConversationService:
                     "Report actual validation evidence and PR URL. Ask for clarification if "
                     "requirements are unclear. Never expose credentials in output or files.",
                     "task": payload,
+                    "conversation_history": history,
                     "parent_rules": parent_rules(path),
                     "current_unix_time": int(time.time()),
                 },
@@ -302,7 +314,21 @@ class ConversationService:
                     "the repository before submitting again."
                 )
             )
-            self.change(tid, "failed", self.clean(message))
+            result = self.clean(
+                json.dumps(
+                    {
+                        "outcome": "failed",
+                        "summary": message,
+                        "pr_url": "",
+                        "validation": "Not passed",
+                    }
+                )
+            )
+            self.change(tid, "save_pending", result)
+            try:
+                await self.save_result(self.request(tid))
+            except ConfigError:
+                pass
 
     async def verify_delivery(self, payload, result, token):
         from prbot.github import DeliveryError, GitHub
@@ -324,6 +350,9 @@ class ConversationService:
             )
             if not required or not await github.checks(repo, pr["head"]["sha"], required):
                 raise ConfigError("Remote checks have not passed. Review the PR Checks tab.")
+            current = await github.request("GET", f"/repos/{repo}/pulls/{number}")
+            if current["head"]["sha"] != pr["head"]["sha"]:
+                raise ConfigError("PR changed during verification. Recheck the latest commit.")
         except DeliveryError:
             raise ConfigError(
                 "GitHub delivery could not be verified. Review the PR Checks tab."

@@ -66,6 +66,12 @@ def load_secrets(refresh=False):
                 "Infisical unavailable. Check the connection settings, network "
                 "and machine identity permissions, then retry."
             ) from None
+        # Console copy/paste can retain shell quotes around the REST endpoint.
+        endpoint = values.get("UPSTASH_REDIS_REST_URL", "").strip()
+        if len(endpoint) >= 2 and endpoint[0] in {"'", '"'} and endpoint[-1] == endpoint[0]:
+            endpoint = endpoint[1:-1].strip()
+        if endpoint:
+            values["UPSTASH_REDIS_REST_URL"] = endpoint
         if not values.get("TELEGRAM_BOT_TOKEN") and values.get("PR_BOT_TOKEN"):
             values["TELEGRAM_BOT_TOKEN"] = values["PR_BOT_TOKEN"]
         _cache, _expires = values, time.monotonic() + 60
