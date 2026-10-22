@@ -124,6 +124,7 @@ def show(check_output=None):
             body = message.body()
             allowed = ACTIONS | {
                 "ready",
+                "open_github",
                 "refresh_service",
                 "submit_message",
                 "history",
@@ -160,6 +161,13 @@ def show(check_output=None):
                 try:
                     extra = {}
                     feedback = None
+                    if action == "open_github":
+                        from prbot.conversation_service import target_link
+
+                        link = request.get("text")
+                        target_link(link, "Pull Request")
+                        AppHelper.callAfter(self.open_github, link)
+                        return
                     if action in ACTIONS:
                         feedback = perform_action(action)
                     elif action in {"connections", "use_id_token"}:
@@ -219,6 +227,15 @@ def show(check_output=None):
                     )
 
             Thread(target=work, daemon=True).start()
+
+        @objc.python_method
+        def open_github(self, link):
+            opened = AppKit.NSWorkspace.sharedWorkspace().openURL_(NSURL.URLWithString_(link))
+            self.finish(
+                "Pull request opened." if opened else "Could not open the pull request.",
+                bool(opened),
+                {},
+            )
 
         @objc.python_method
         def finish(self, message, ok, extra):

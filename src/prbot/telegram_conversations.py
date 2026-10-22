@@ -1,5 +1,6 @@
 """Telegram adapter for the same service used by the desktop window."""
 
+import json
 import time
 
 from prbot.config import ConfigError
@@ -130,7 +131,19 @@ async def send_results(application, bot, stop):
             ).fetchall()
         for row in rows:
             # A save_pending result can be delivered but still needs archive-only retry.
-            text = f"Task {row['id']}: {row['status']}\n{row['result'] or ''}"
+            result = row["result"] or ""
+            try:
+                parsed = json.loads(result)
+                result = (
+                    parsed.get("summary", "")
+                    + "\n"
+                    + ("PR: " + parsed["pr_url"] + "\n" if parsed.get("pr_url") else "")
+                    + "Validation: "
+                    + parsed.get("validation", "Not passed")
+                )
+            except (ValueError, AttributeError, TypeError):
+                pass
+            text = f"Task {row['id']}: {row['status'].replace('_', ' ')}\n{result}"
             chat, _, thread = row["actor"].split(":")
             status = "pending"
             try:
