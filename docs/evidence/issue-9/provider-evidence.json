@@ -1,5 +1,5 @@
 {
-  "started_at": 1792628562,
+  "started_at": 1792689344,
   "infisical": true,
   "redis_ping": true,
   "host_file_write": true,
@@ -12,5 +12,5 @@
   "configured_capacity_bytes": 10000000,
   "github_authenticated_read": true,
   "ok": true,
-  "finished_at": 1792628583
+  "finished_at": 1792689368
 }
