@@ -95,3 +95,9 @@ def require_secrets(*keys):
             + "."
         )
     return values
+
+
+def clear_cache():
+    global _cache, _expires
+    with _lock:
+        _cache, _expires = None, 0

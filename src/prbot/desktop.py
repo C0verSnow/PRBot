@@ -39,7 +39,7 @@ def show(check_output=None):
         while not stop.is_set():
             try:
                 runtime["service"] = ConversationService()
-                await runtime["service"].run(stop)
+                await runtime["service"].run(stop, source="desktop")
             except ConfigError:
                 await asyncio.sleep(3)
 

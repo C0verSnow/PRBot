@@ -80,6 +80,10 @@ async def check():
             await application.execute(application.request(rid))
             row = application.request(rid)
             if row["status"] != "completed":
+                evidence["sdk_status"] = row["status"]
+                diagnostic = json.loads(row["result"] or "{}")
+                evidence["sdk_error_code"] = diagnostic.get("error_code", "unknown")
+                evidence["sdk_stage"] = diagnostic.get("stage", "unknown")
                 raise ConfigError("Real SDK acceptance failed. Inspect the safe task category.")
             evidence["host_file_write"] = (outside / "write.txt").read_text().strip() == "write-ok"
             evidence["host_shell_command"] = (

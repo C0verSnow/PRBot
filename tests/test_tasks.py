@@ -265,3 +265,29 @@ async def test_orphaned_claim_is_interrupted_even_when_pid_has_been_reused(app):
     await runner
     assert app.request("request-123")["status"] == "interrupted"
     app.adapter.invoke.assert_not_awaited()
+
+
+async def test_accepted_task_keeps_selected_workspace_when_preference_changes(app, tmp_path):
+    from prbot.task_config import select_work_root
+
+    first, second = tmp_path / "first", tmp_path / "second"
+    first.mkdir()
+    second.mkdir()
+    select_work_root(str(first))
+    await submit(app)
+    select_work_root(str(second))
+    await app.execute(app.request("request-123"))
+    path = app.adapter.invoke.call_args.args[0]
+    assert path.parent == first / "PRBot-workspaces"
+    assert not list((second / "PRBot-workspaces").glob("task-*"))
+
+
+async def test_telegram_runner_cannot_claim_desktop_id_token_override(app):
+    await submit(app)
+    stop = asyncio.Event()
+    runner = asyncio.create_task(app.run(stop, source="telegram"))
+    await asyncio.sleep(0.1)
+    stop.set()
+    await runner
+    assert app.request("request-123")["status"] == "queued"
+    app.adapter.invoke.assert_not_awaited()

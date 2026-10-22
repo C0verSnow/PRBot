@@ -13,9 +13,10 @@ import re
 import sqlite3
 import time
 from contextlib import contextmanager
+from pathlib import Path
 from urllib.parse import urlsplit
 
-from prbot.codex_adapter import CodexAdapter, parent_rules
+from prbot.codex_adapter import CodexAdapter, SDKFailure, parent_rules
 from prbot.config import ConfigError, workspace_directory
 from prbot.conversation_store import ConversationStore
 from prbot.execution_setup import codex_login, github_token
@@ -141,7 +142,14 @@ class ConversationService:
             return self.public(existing)
         payload = self.clean(
             json.dumps(
-                {"repo": repo, "kind": kind, "number": number, "link": link, "text": text.strip()}
+                {
+                    "repo": repo,
+                    "kind": kind,
+                    "number": number,
+                    "link": link,
+                    "text": text.strip(),
+                    "workspace_root": str(workspace_directory()),
+                }
             )
         )
         now = time.time()
@@ -230,11 +238,13 @@ class ConversationService:
     async def execute(self, row):
         tid = row["id"]
         try:
-            root = workspace_directory()
+            payload = json.loads(row["payload"])
+            root = Path(payload["workspace_root"])
+            if root.is_symlink():
+                raise ConfigError("Working directory cannot be a symlink.")
             root.mkdir(parents=True, exist_ok=True)
             path = root / ("task-" + hashlib.sha256(tid.encode()).hexdigest()[:20])
             path.mkdir(exist_ok=True)
-            payload = json.loads(row["payload"])
             history = []
             if not self.adapter:
                 cursor = "0"
@@ -309,7 +319,7 @@ class ConversationService:
                 return  # Retry archival only; SDK has already finished.
             message = (
                 str(error)
-                if isinstance(error, ConfigError)
+                if isinstance(error, (ConfigError, SDKFailure))
                 else (
                     "Task failed. Check Codex sign-in, GitHub access and network, then review "
                     "the repository before submitting again."
@@ -325,6 +335,12 @@ class ConversationService:
                     }
                 )
             )
+            if isinstance(error, SDKFailure):
+                diagnostic = json.loads(result)
+                diagnostic.update(
+                    error_code=error.code, stage=error.stage, exception_type=error.exception_type
+                )
+                result = json.dumps(diagnostic)
             self.change(tid, "save_pending", result)
             try:
                 await self.save_result(self.request(tid))
@@ -361,7 +377,7 @@ class ConversationService:
         finally:
             await github.close()
 
-    async def run(self, stop):
+    async def run(self, stop, source=None):
         # A kernel lock is released on process exit; unlike PID-only ownership it
         # cannot mistake a reused PID after reboot for a still-running SDK task.
         with open(data_dir() / "workbench-execution.lock", "a") as lock:
@@ -383,7 +399,9 @@ class ConversationService:
                             ("Interrupted. Review repository state before retrying.",),
                         )
                         row = db.execute(
-                            "SELECT * FROM requests WHERE status='queued' ORDER BY created LIMIT 1"
+                            "SELECT * FROM requests WHERE status='queued' "
+                            "AND (? IS NULL OR source=?) ORDER BY created LIMIT 1",
+                            (source, source),
                         ).fetchone()
                         if row:
                             db.execute(

@@ -141,7 +141,7 @@ async def run(config, state, stop, report):
                     initialized = True
                     receiver = Receiver(bot, state, CommandRouter(bot.username, conversations))
                     background = [
-                        asyncio.create_task(application.run(stop)),
+                        asyncio.create_task(application.run(stop, source="telegram")),
                         asyncio.create_task(send_results(application, bot, stop)),
                     ]
                     log.info("Telegram verified; starting long polling")
