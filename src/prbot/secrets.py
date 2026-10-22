@@ -11,10 +11,11 @@ from prbot.config import ConfigError, read_env
 _lock = Lock()
 _cache = None
 _expires = 0
+_cache_key = None
 
 
-def bootstrap():
-    values = read_env()
+def bootstrap(configuration=None):
+    values = read_env() if configuration is None else read_env(configuration)
     values.update({k: v for k, v in os.environ.items() if k.startswith("INFISICAL_")})
     required = ("INFISICAL_CLIENT_ID", "INFISICAL_CLIENT_SECRET", "INFISICAL_PROJECT_ID")
     missing = [key for key in required if not values.get(key)]
@@ -27,12 +28,18 @@ def bootstrap():
     return values
 
 
-def load_secrets(refresh=False):
-    global _cache, _expires
+def load_secrets(refresh=False, configuration=None):
+    global _cache, _expires, _cache_key
     with _lock:
-        if not refresh and _cache is not None and time.monotonic() < _expires:
+        settings = bootstrap() if configuration is None else bootstrap(configuration)
+        identity = tuple(sorted(settings.items()))
+        if (
+            not refresh
+            and _cache is not None
+            and _cache_key == identity
+            and time.monotonic() < _expires
+        ):
             return dict(_cache)
-        settings = bootstrap()
         url = settings.get("INFISICAL_URL", "https://app.infisical.com").rstrip("/")
         if not url.startswith("https://"):
             raise ConfigError("INFISICAL_URL must use HTTPS.")
@@ -74,15 +81,15 @@ def load_secrets(refresh=False):
             values["UPSTASH_REDIS_REST_URL"] = endpoint
         if not values.get("TELEGRAM_BOT_TOKEN") and values.get("PR_BOT_TOKEN"):
             values["TELEGRAM_BOT_TOKEN"] = values["PR_BOT_TOKEN"]
-        _cache, _expires = values, time.monotonic() + 60
+        _cache, _expires, _cache_key = values, time.monotonic() + 60, identity
         return dict(values)
 
 
-def require_secrets(*keys):
-    values = load_secrets()
+def require_secrets(*keys, configuration=None):
+    values = load_secrets() if configuration is None else load_secrets(configuration=configuration)
     missing = [key for key in keys if not values.get(key)]
     if missing:
-        cfg = bootstrap()
+        cfg = bootstrap() if configuration is None else bootstrap(configuration)
         raise ConfigError(
             "Missing secrets in Infisical: "
             + ", ".join(missing)
@@ -98,6 +105,6 @@ def require_secrets(*keys):
 
 
 def clear_cache():
-    global _cache, _expires
+    global _cache, _expires, _cache_key
     with _lock:
-        _cache, _expires = None, 0
+        _cache, _expires, _cache_key = None, 0, None

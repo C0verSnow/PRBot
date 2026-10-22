@@ -67,9 +67,9 @@ def prepare_env_directory(folder=None):
         raise ConfigError("Cannot prepare .env. Check working directory permissions.") from None
 
 
-def read_env():
+def read_env(configuration=None):
     # Never search arbitrary task directories or inherit their credentials.
-    path = env_path()
+    path = env_path() if configuration is None else Path(configuration)
     if path.is_symlink():
         raise ConfigError(".env cannot be a symlink. Check the working directory.")
     if not path.exists():

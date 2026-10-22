@@ -17,7 +17,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from prbot.codex_adapter import CodexAdapter, SDKFailure, parent_rules
-from prbot.config import ConfigError, workspace_directory
+from prbot.config import ConfigError, env_path, workspace_directory
 from prbot.conversation_store import ConversationStore
 from prbot.execution_setup import codex_login, github_token
 from prbot.paths import data_dir
@@ -149,6 +149,7 @@ class ConversationService:
                     "link": link,
                     "text": text.strip(),
                     "workspace_root": str(workspace_directory()),
+                    "configuration_file": str(env_path()),
                 }
             )
         )
@@ -211,6 +212,14 @@ class ConversationService:
                 (status, result, time.time(), task_id),
             )
 
+    def select_task_connections(self, row):
+        if not self.adapter:
+            configuration = json.loads(row["payload"]).get("configuration_file")
+            self.values = require_secrets(
+                "UPSTASH_REDIS_REST_URL", "UPSTASH_REDIS_REST_TOKEN", configuration=configuration
+            )
+            self.archive = ConversationStore(self.values)
+
     async def save_result(self, row):
         message = {
             "conversation_id": row["conversation"],
@@ -222,7 +231,7 @@ class ConversationService:
             "created_at": row["changed"],
             "delivery_status": "saved",
             "task_id": row["id"],
-            "sequence": row["created"] + 0.001,
+            "sequence": row["changed"],
         }
         await self.archive.save(message)
         outcome = json.loads(row["result"]).get("outcome", "failed")
@@ -232,12 +241,16 @@ class ConversationService:
         row = self.request(task_id)
         if not row or row["actor"] != actor or row["status"] != "save_pending":
             raise ConfigError("No pending result to save.")
+        self.select_task_connections(row)
         await self.save_result(row)
         return self.public(self.request(task_id))
 
     async def execute(self, row):
         tid = row["id"]
+        archive_ready = bool(self.adapter)
         try:
+            self.select_task_connections(row)
+            archive_ready = True
             payload = json.loads(row["payload"])
             root = Path(payload["workspace_root"])
             if root.is_symlink():
@@ -342,10 +355,11 @@ class ConversationService:
                 )
                 result = json.dumps(diagnostic)
             self.change(tid, "save_pending", result)
-            try:
-                await self.save_result(self.request(tid))
-            except ConfigError:
-                pass
+            if archive_ready:
+                try:
+                    await self.save_result(self.request(tid))
+                except ConfigError:
+                    pass
 
     async def verify_delivery(self, payload, result, token):
         from prbot.github import DeliveryError, GitHub

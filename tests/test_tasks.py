@@ -291,3 +291,38 @@ async def test_telegram_runner_cannot_claim_desktop_id_token_override(app):
     await runner
     assert app.request("request-123")["status"] == "queued"
     app.adapter.invoke.assert_not_awaited()
+
+
+async def test_archive_retry_selects_the_accepted_configuration(app, tmp_path, monkeypatch):
+    from prbot.task_config import select_work_root
+
+    first = tmp_path / "first"
+    second = tmp_path / "second"
+    first.mkdir()
+    second.mkdir()
+    select_work_root(str(first))
+    await submit(app)
+    select_work_root(str(second))
+    selected = Mock(return_value={})
+    archive = Mock(save=AsyncMock())
+    monkeypatch.setattr("prbot.conversation_service.require_secrets", selected)
+    monkeypatch.setattr("prbot.conversation_service.ConversationStore", lambda values: archive)
+    app.adapter = None
+    app.change("request-123", "save_pending", json.dumps({"outcome": "completed"}))
+    await app.retry_save("request-123", "local:me")
+    assert selected.call_args.kwargs["configuration"] == str(first / "PRBot-workspaces/.env")
+    archive.save.assert_awaited_once()
+
+
+async def test_missing_old_configuration_never_archives_to_the_new_project(app, monkeypatch):
+    await submit(app)
+    app.adapter = None
+
+    def unavailable(row):
+        raise ConfigError("Original Infisical configuration unavailable.")
+
+    monkeypatch.setattr(app, "select_task_connections", unavailable)
+    await app.execute(app.request("request-123"))
+    assert app.request("request-123")["status"] == "save_pending"
+    assert "Original Infisical" in app.request("request-123")["result"]
+    assert app.archive.save.await_count == 1

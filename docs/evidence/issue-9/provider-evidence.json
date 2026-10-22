@@ -1,0 +1,16 @@
+{
+  "started_at": 1792628562,
+  "infisical": true,
+  "redis_ping": true,
+  "host_file_write": true,
+  "host_shell_command": true,
+  "idempotent_sdk_execution": true,
+  "redis_history_restored": true,
+  "no_credentials_in_history": true,
+  "complete_local_login": true,
+  "atomic_budget_and_dedup": true,
+  "configured_capacity_bytes": 10000000,
+  "github_authenticated_read": true,
+  "ok": true,
+  "finished_at": 1792628583
+}
