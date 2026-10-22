@@ -126,7 +126,11 @@ def show(check_output=None):
                 "retry_save",
                 "tasks",
             }
-            if not hasattr(body, "get") or body.get("action") not in allowed:
+            if (
+                not hasattr(body, "get")
+                or not isinstance(body.get("action"), str)
+                or body.get("action") not in allowed
+            ):
                 self.deliver("Unsupported request.", False)
                 return
             action = body.get("action")

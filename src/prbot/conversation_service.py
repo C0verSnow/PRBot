@@ -57,7 +57,7 @@ def target_link(value, mode):
 
 
 def redact(text, secrets):
-    for secret in sorted(set(secrets), key=len, reverse=True):
+    for secret in sorted({s for s in secrets if isinstance(s, str)}, key=len, reverse=True):
         if isinstance(secret, str) and len(secret) >= 8:
             text = text.replace(secret, "[REDACTED]")
     text = re.sub(r"\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+", "[REDACTED]", text)
@@ -75,6 +75,7 @@ class ConversationService:
         )
         self.archive = archive or ConversationStore(self.values)
         self.adapter = adapter
+        self.runtime_secrets = []
         self.path = data_dir() / "workbench.sqlite3"
         with self.db() as db:
             db.executescript("""
@@ -98,7 +99,13 @@ class ConversationService:
             db.close()
 
     def clean(self, text):
-        secrets = list(self.values.values())
+        secrets = list(self.values.values()) + self.runtime_secrets
+        try:
+            from prbot.secrets import bootstrap
+
+            secrets.extend(bootstrap().values())
+        except ConfigError:
+            pass
         try:
             auth = json.loads(codex_login())
             secrets.extend(auth.get("tokens", {}).values())
@@ -234,6 +241,7 @@ class ConversationService:
                 import base64
 
                 token = github_token(self.values)
+                self.runtime_secrets.append(token)
                 basic = base64.b64encode(("x-access-token:" + token).encode()).decode()
                 adapter = CodexAdapter(
                     codex_login(),

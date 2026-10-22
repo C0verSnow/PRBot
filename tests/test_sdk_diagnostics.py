@@ -173,10 +173,12 @@ def test_worker_explicitly_enables_host_tools_and_full_access(tmp_path, monkeypa
         ),
     )
     sdk_worker.run()
-    config = sdk.Codex.call_args.args[0]
-    assert config.launch_args_override[0] == str(runtime)
-    assert 'sandbox_mode="danger-full-access"' in config.launch_args_override
-    assert 'approval_policy="never"' in config.launch_args_override
-    assert not any("=false" in arg or "sandbox-exec" in arg for arg in config.launch_args_override)
+    config = sdk.CodexConfig.call_args.kwargs
+    assert config["launch_args_override"][0] == str(runtime)
+    assert 'sandbox_mode="danger-full-access"' in config["launch_args_override"]
+    assert 'approval_policy="never"' in config["launch_args_override"]
+    assert not any(
+        "=false" in arg or "sandbox-exec" in arg for arg in config["launch_args_override"]
+    )
     assert client.thread_start.call_args.kwargs["sandbox"] == sdk.Sandbox.full_access
     assert client.thread_start.call_args.kwargs["approval_mode"] == sdk.ApprovalMode.deny_all
