@@ -30,7 +30,7 @@
 
 - [首轮远端 CI 39974242241](https://github.com/C0verSnow/PRBot/actions/runs/39974242241)：前端检查和构建通过；183 个 Python 通过、1 个既有交付测试失败。失败暴露新增类型判断与适配器工厂替身不兼容，已移除该类型耦合，保留原测试断言。
 - [远端 CI 39974450225](https://github.com/C0verSnow/PRBot/actions/runs/39974450225)：184 个 Python 测试、前端检查/构建、源码及安装包真实 WebKit、DMG 挂载复制和嵌入运行时均通过。已下载源码 UI JSON 核对 `ok=true` 并查看截图。
-- 后续补充了 Worker 实际事件筛选测试、跨动作旧任务快照保护、历史切换请求排队、日志滚动和回答任务归属的 WebKit 验证。[功能验证 CI 39976685682](https://github.com/C0verSnow/PRBot/actions/runs/39976685682) 的 test / dmg 全通过：187 项 Python、前端检查构建、源码及安装包 WebKit、DMG 挂载复制和内嵌运行时。已下载并检查安装包 UI JSON 及三张截图。最后附加 JSON 转义凭据过滤回归，交付提交继续由同一 PR 的 required test / dmg 验证，以 PR Checks 为准。
+- 后续补充了 Worker 实际事件筛选测试、跨动作旧任务快照保护、历史切换请求排队、日志滚动和回答任务归属的 WebKit 验证。[功能验证 CI 39976685682](https://github.com/C0verSnow/PRBot/actions/runs/39976685682) 的 test / dmg 全通过：187 项 Python、前端检查构建、源码及安装包 WebKit、DMG 挂载复制和内嵌运行时。已下载并检查安装包 UI JSON 及三张截图。最后附加 JSON 转义凭据过滤回归后的 `8e4fdec` 也已通过 [最终功能 CI 39977233098](https://github.com/C0verSnow/PRBot/actions/runs/39977233098)：188 项 Python、前端检查构建、源码及安装包 WebKit、DMG 挂载复制与内置运行时全部成功；可选真实提供商 acceptance 按用户选择不执行。
 
 自动化覆盖：原目标及同任务回答、其他 actor/source 拒绝访问、重复回答、归档失败不继续、重启后等待状态、不同轮次结果不覆盖、私人聊天不调用 GitHub 验证、超时分类、事件凭据过滤、输出数量限制、最终结果前收到事件、真实 SDK 初始化和已有 GitHub / Telegram 回归。
 
