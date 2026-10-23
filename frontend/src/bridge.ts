@@ -53,7 +53,7 @@ export function useNativeBridge() {
           if (key === 'ok' && !payload.message) continue;
           // Keep object identity for unchanged status, tasks and configuration responses.
           // Explicit token actions still need to apply even if their value is unchanged.
-          if (key === 'id_token_result' || JSON.stringify(previous[key as keyof NativeResult]) !== JSON.stringify(value)) {
+          if (key === 'id_token_result' || (key === 'configuration' && action === 'save_configuration') || JSON.stringify(previous[key as keyof NativeResult]) !== JSON.stringify(value)) {
             Object.assign(next, { [key]: value });
           }
         }

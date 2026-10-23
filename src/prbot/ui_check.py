@@ -455,6 +455,13 @@ true;
   assertValues(updated, true); checkFieldHelp();
   assert(field('INFISICAL_CLIENT_SECRET').placeholder.includes('Configured'),
     'Blank save lost configured Secret');
+  // Saving a draft reverted to its original values must still acknowledge success.
+  edit(field('INFISICAL_SECRET_PATH'), '/temporary-draft'); await tick();
+  edit(field('INFISICAL_SECRET_PATH'), updated.INFISICAL_SECRET_PATH); await tick();
+  assert(!field('save-configuration').disabled, 'Reverted draft was not marked dirty');
+  field('save-configuration').click(); await tick();
+  await waitFor(() => !field('INFISICAL_URL').disabled && field('save-configuration').disabled);
+  assertValues(updated, true);
   await select('Background Service');
   await tick();
   assert(document.querySelectorAll('#service-power').length === 1);
