@@ -161,7 +161,10 @@ def test_worker_commentary_filter_includes_short_sensitive_values(monkeypatch):
     assert "abcdefgh" not in safe_text("value=tiny Bearer abcdefgh", {"auth": "{}"})
 
 
-def test_worker_streams_safe_commentary_and_omits_tool_output(tmp_path, monkeypatch, capsys):
+@pytest.mark.parametrize("native_questions", [False, True])
+def test_worker_streams_safe_commentary_and_omits_tool_output(
+    tmp_path, monkeypatch, capsys, native_questions
+):
     import io
     import sys
     from types import SimpleNamespace as NS
@@ -190,7 +193,14 @@ def test_worker_streams_safe_commentary_and_omits_tool_output(tmp_path, monkeypa
         NS(
             method="item/completed",
             payload=NS(
-                item=NS(type="agentMessage", phase="final_answer", text=json.dumps(response))
+                item=NS(
+                    type="agentMessage",
+                    phase="final_answer",
+                    text=json.dumps(response),
+                    questions=[NS(title="Which branch?", options=["feature/ui", "feature/api"])]
+                    if native_questions
+                    else None,
+                )
             ),
         ),
         NS(method="turn/completed", payload=NS(turn=NS(status=NS(value="completed")))),
@@ -222,9 +232,18 @@ def test_worker_streams_safe_commentary_and_omits_tool_output(tmp_path, monkeypa
     output = capsys.readouterr().out
     assert "RAW-TOOL-SECRET" not in output and "top-secret-token" not in output
     envelopes = [json.loads(line) for line in output.splitlines()]
-    assert [event["type"] for event in envelopes] == ["progress", "text", "result"]
+    assert [event["type"] for event in envelopes] == (
+        ["progress", "text", "interaction", "result"]
+        if native_questions
+        else ["progress", "text", "result"]
+    )
     assert all(event["v"] == 1 for event in envelopes)
-    assert envelopes[-1]["result"] == response
+    if native_questions:
+        assert envelopes[-1]["result"]["outcome"] == "needs_clarification"
+        assert "Which branch?" in envelopes[-1]["result"]["summary"]
+        assert "feature/ui" in envelopes[-1]["result"]["summary"]
+    else:
+        assert envelopes[-1]["result"] == response
     assert client.thread_start.call_args.kwargs["sandbox"] == sdk.Sandbox.read_only
 
 

@@ -135,6 +135,7 @@ def _run():
             )
             turn = thread.turn(request["prompt"], output_schema=request["schema"])
             final_response = None
+            questions = []
             completed = False
             for event in turn.stream():
                 # Do not forward raw RPC payloads, commands, reasoning or tool output.
@@ -144,6 +145,11 @@ def _run():
                     item = event.payload.item
                     item = item.root if hasattr(item, "root") else item
                     if getattr(item, "type", None) == "agentMessage":
+                        for question in getattr(item, "questions", None) or []:
+                            title = question.title
+                            if question.options:
+                                title += "\nOptions: " + "; ".join(question.options)
+                            questions.append(title)
                         phase = getattr(item, "phase", None)
                         phase = getattr(phase, "value", phase)
                         if phase in {None, "final_answer"}:
@@ -152,9 +158,18 @@ def _run():
                             emit({"type": "text", "text": safe_text(item.text, request)})
                 elif event.method == "turn/completed":
                     completed = event.payload.turn.status.value == "completed"
-            if not completed or not final_response:
+            if not completed or (not final_response and not questions):
                 raise RuntimeError("Codex turn did not complete")
-            result = json.loads(final_response)
+            result = (
+                {
+                    "outcome": "needs_clarification",
+                    "summary": "\n\n".join(questions),
+                    "pr_url": "",
+                    "validation": "Waiting for your answer",
+                }
+                if questions
+                else json.loads(final_response)
+            )
             if result.get("outcome") == "needs_clarification":
                 emit({"type": "interaction", "text": safe_text(result.get("summary", ""), request)})
             emit({"type": "result", "result": result, "auth": auth.read_text()})

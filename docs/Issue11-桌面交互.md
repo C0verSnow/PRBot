@@ -18,7 +18,7 @@
 
 ## SDK 能力核对与技术选择
 
-锁定版本 `openai-codex==0.163.0` 与 `openai-codex-cli-bin==0.163.0`。核对了发布 wheel 的 `api.py`、`client.py`、`_run.py`：`thread.turn(...).stream()` 支持逐事件读取，`turn.run()` 会收集到结束；`thread_resume` 是已有持久化线程的恢复。当前高层 `Codex` 构造器没有问答处理器参数，原有线程为 ephemeral 且临时 CODEX_HOME 在结束时销毁。
+锁定版本 `openai-codex==0.163.0` 与 `openai-codex-cli-bin==0.163.0`。核对了发布 wheel 的 `api.py`、`client.py`、`_run.py`：`thread.turn(...).stream()` 支持逐事件读取，`turn.run()` 会收集到结束；`thread_resume` 是已有持久化线程的恢复。`AgentMessageThreadItem.questions` 还可以携带原生问题及选项，Worker 会将其转换为同一等待回答流程。当前高层 `Codex` 构造器没有问答处理器参数，原有线程为 ephemeral 且临时 CODEX_HOME 在结束时销毁。
 
 因此不声称能暂停恢复这个临时 SDK 线程。模型需要信息时用既有输出 schema 返回 `needs_clarification` 和明确问题；PRBot 将原任务置为等待回答。答案先保存到 Upstash，再以原 task ID、原目标、原需求及有序问题/答案重新排队。新 SDK 轮次明确要求检查已有仓库工作，避免重复交付。等待状态和问题不会因客户端重开丢失。已运行的任务关闭窗口后仍按既有规则中断，不自动重跑。
 
