@@ -9,6 +9,10 @@ class DeliveryError(Exception):
     pass
 
 
+class CheckFailure(DeliveryError):
+    """Required checks finished unsuccessfully; distinct from an unreadable API response."""
+
+
 class GitHub:
     def __init__(self, token):
         self.client = httpx.AsyncClient(
@@ -111,7 +115,7 @@ class GitHub:
             }
             for k in required
         ):
-            raise DeliveryError("Required remote checks failed. Open the PR Checks tab.")
+            raise CheckFailure("Required remote checks failed. Open the PR Checks tab.")
         return all(values.get(k) == "success" for k in required)
 
     async def ready(self, repo, number, expected_sha=None):

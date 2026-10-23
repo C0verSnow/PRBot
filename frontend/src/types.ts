@@ -24,7 +24,7 @@ export interface Message {
   message_id: string; content: string; role: string; sequence: number; task_id: string;
 }
 export interface NativeResult {
-  ok: boolean; message?: string | null; busy?: boolean; status?: ServiceStatus;
+  ok: boolean; message?: string | null; busy?: boolean; completed_action?: Action; status?: ServiceStatus;
   connections?: { id_token: string; infisical: string; project: string };
   id_token_result?: { token: string; applied: boolean };
   configuration?: InfisicalConfiguration;

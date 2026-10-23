@@ -354,7 +354,7 @@ async def test_empty_or_oversized_descriptions_are_rejected(app, text):
 async def test_delivery_preserves_pr_and_closed_issue_when_checks_not_passed(
     app, monkeypatch, checks, expected
 ):
-    from prbot.github import DeliveryError
+    from prbot.github import CheckFailure, DeliveryError
 
     github = Mock(
         request=AsyncMock(
@@ -368,7 +368,7 @@ async def test_delivery_preserves_pr_and_closed_issue_when_checks_not_passed(
         close=AsyncMock(),
     )
     if checks == "failure":
-        github.checks.side_effect = DeliveryError(
+        github.checks.side_effect = CheckFailure(
             "Required remote checks failed. Open the PR Checks tab."
         )
     if checks == "network":
@@ -388,3 +388,115 @@ async def test_delivery_preserves_pr_and_closed_issue_when_checks_not_passed(
     assert result["pr_url"] == "https://github.com/o/r/pull/1"
     assert result["delivery"]["code"] == "completed_by_codex"
     github.close.assert_awaited_once()
+
+
+async def test_execution_archives_delivery_facts_and_retry_preserves_them(app, monkeypatch):
+    from prbot.github import CheckFailure
+
+    await submit(app)
+    adapter = app.adapter
+    app.adapter = None  # Exercise the production execution + delivery verification boundary.
+    app.archive.history.return_value = {"messages": [], "cursor": "0"}
+    monkeypatch.setattr(app, "select_task_connections", lambda row: None)
+    monkeypatch.setattr("prbot.conversation_service.github_token", lambda values: "test-token")
+    monkeypatch.setattr("prbot.conversation_service.codex_login", lambda: "{}")
+    monkeypatch.setattr("prbot.conversation_service.CodexAdapter", lambda *a, **k: adapter)
+    github = Mock(
+        request=AsyncMock(
+            side_effect=[
+                {"state": "open", "head": {"sha": "head"}},
+                {"state": "closed"},
+                {"state": "open", "head": {"sha": "head"}},
+            ]
+        ),
+        checks=AsyncMock(side_effect=CheckFailure("Required remote checks failed.")),
+        close=AsyncMock(),
+    )
+    monkeypatch.setattr("prbot.github.GitHub", lambda token: github)
+    app.archive.save.side_effect = ConfigError("Message not saved. Retry.")
+    await app.execute(app.request("request-123"))
+    row = app.request("request-123")
+    assert row["status"] == "save_pending"
+    result = json.loads(row["result"])
+    assert result["outcome"] == "delivered_unverified"
+    assert result["delivery"]["issue"] == "closed"
+    assert result["delivery"]["ci"] == "failed"
+    assert result["pr_url"] == "https://github.com/o/r/pull/1"
+    app.archive.save.side_effect = None
+    await app.retry_save("request-123", "local:me")
+    assert app.request("request-123")["status"] == "delivered_unverified"
+    assert app.request("request-123")["result"] == row["result"]
+    adapter.invoke.assert_awaited_once()
+
+
+@pytest.mark.parametrize("case", ["changed_head", "open_issue", "unreadable_issue", "merged_pr"])
+async def test_verification_never_claims_full_acceptance_for_incomplete_delivery(
+    app, monkeypatch, case
+):
+    from prbot.github import DeliveryError
+
+    current = {"state": "open", "head": {"sha": "new" if case == "changed_head" else "head"}}
+    if case == "merged_pr":
+        current["merged"] = True
+    issue = (
+        DeliveryError("unavailable")
+        if case == "unreadable_issue"
+        else {"state": "open" if case == "open_issue" else "closed"}
+    )
+    github = Mock(
+        request=AsyncMock(
+            side_effect=[
+                {"state": "open", "head": {"sha": "head"}},
+                issue,
+                current,
+            ]
+        ),
+        checks=AsyncMock(return_value=True),
+        close=AsyncMock(),
+    )
+    monkeypatch.setattr("prbot.github.GitHub", lambda token: github)
+    result = {"outcome": "completed", "pr_url": "https://github.com/o/r/pull/1"}
+    await app.verify_delivery({"repo": "o/r", "kind": "issues", "number": 9}, result, "token")
+    assert result["outcome"] == "delivered_unverified"
+    assert result["pr_url"].endswith("/pull/1")
+    assert result["delivery"]["ci"] == ("pending" if case == "changed_head" else "passed")
+
+
+async def test_verification_rejects_unrelated_pr_and_preserves_report(app):
+    result = {
+        "outcome": "completed",
+        "summary": "SDK report",
+        "pr_url": "https://github.com/o/other/pull/1",
+    }
+    await app.verify_delivery({"repo": "o/r", "kind": "issues", "number": 9}, result, "token")
+    assert result["outcome"] == "failed"
+    assert result["summary"] == "SDK report"
+    assert result["delivery"]["pr"] == "invalid"
+
+
+async def test_sdk_failure_with_pr_keeps_github_facts_without_claiming_code_success(
+    app, monkeypatch
+):
+    github = Mock(
+        request=AsyncMock(
+            side_effect=[
+                {"state": "open", "head": {"sha": "head"}},
+                {"state": "closed"},
+                {"state": "open", "head": {"sha": "head"}},
+            ]
+        ),
+        checks=AsyncMock(return_value=True),
+        close=AsyncMock(),
+    )
+    monkeypatch.setattr("prbot.github.GitHub", lambda token: github)
+    result = {"outcome": "failed", "pr_url": "https://github.com/o/r/pull/1"}
+    await app.verify_delivery({"repo": "o/r", "kind": "issues", "number": 9}, result, "token")
+    assert result["outcome"] == "delivered_unverified"
+    assert result["delivery"] == {
+        "code": "not_confirmed",
+        "pr": "open",
+        "issue": "closed",
+        "ci": "passed",
+        "head_sha": "head",
+        "detail": "Required remote checks passed.",
+    }

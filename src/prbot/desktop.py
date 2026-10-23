@@ -212,20 +212,25 @@ def show(check_output=None):
                 import time
 
                 self.control_verified_at = time.time()
-                self.deliver("Service process status verified.")
+                self.deliver("Service process status verified.", extra={"completed_action": action})
                 return
             if action == "ready":
                 self.deliver()
                 return
             if self.busy:
-                self.deliver("An operation is still in progress. Please wait.", False)
+                self.deliver(
+                    "An operation is still in progress. Please wait.",
+                    False,
+                    {"completed_action": action},
+                )
                 return
             # JSON round trip prevents retaining PyObjC objects on a worker thread.
             try:
                 request = native_request(body)
             except ConfigError as error:
-                self.deliver(str(error), False)
+                self.deliver(str(error), False, {"completed_action": action})
                 return
+            self.active_action = action
             self.busy = True
 
             def work():
@@ -296,7 +301,8 @@ def show(check_output=None):
         @objc.python_method
         def finish(self, message, ok, extra):
             self.busy = False
-            self.deliver(message, ok, extra)
+            self.deliver(message, ok, {**extra, "completed_action": self.active_action})
+            self.active_action = None
 
         @objc.typedSelector(b"v@:@@@?")
         def webView_decidePolicyForNavigationAction_decisionHandler_(

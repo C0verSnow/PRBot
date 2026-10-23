@@ -20,7 +20,7 @@ def select_work_root(value):
     from prbot.config import prepare_env_directory, save_settings
 
     path = validate_work_root(value)
-    prepare_env_directory(Path(path) / "PRBot-workspaces")
+    prepare_env_directory(Path(path))
     save_settings({"PRBOT_WORK_ROOT": path})
     from prbot.secrets import clear_cache
 

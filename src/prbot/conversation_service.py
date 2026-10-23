@@ -130,9 +130,9 @@ class ConversationService:
             or not isinstance(request_id, str)
             or not re.fullmatch(r"[A-Za-z0-9:_-]{8,100}", request_id)
             or not isinstance(text, str)
-            or not 8 <= len(text.strip()) <= 12000
+            or not 1 <= len(text.strip()) <= 12000
         ):
-            raise ConfigError("Describe the required change in 8 to 12000 characters.")
+            raise ConfigError("Enter a non-empty description of up to 12000 characters.")
         repo, kind, number = target_link(link, mode)
         conversation = self.conversation(actor, source, mode)
         existing = self.request(request_id)
@@ -256,8 +256,7 @@ class ConversationService:
             if root.is_symlink():
                 raise ConfigError("Working directory cannot be a symlink.")
             root.mkdir(parents=True, exist_ok=True)
-            path = root / ("task-" + hashlib.sha256(tid.encode()).hexdigest()[:20])
-            path.mkdir(exist_ok=True)
+            path = root
             history = []
             if not self.adapter:
                 cursor = "0"
@@ -295,8 +294,11 @@ class ConversationService:
                     "Use host git authentication and the GH_TOKEN environment variable "
                     "for GitHub REST. "
                     "Do not assume gh is installed. Never print the token. Clone or "
-                    "synchronize the repository into "
-                    "this task directory. Work on a feature branch. For an existing PR, fetch "
+                    "synchronize the repository into a repository-named folder under "
+                    "the selected working directory (owner/repository when needed). Reuse an "
+                    "existing matching checkout only when safe; preserve user changes. Never "
+                    "name folders after task IDs or create a PRBot-specific workspace root. "
+                    "Work on a feature branch. For an existing PR, fetch "
                     "its head and push requested fixes to that PR only if authorized and writable. "
                     "Never merge or approve a PR. Never run local builds, compilation tests or "
                     "smoke scripts; run required tests in existing remote CI and wait for them. "
@@ -314,7 +316,10 @@ class ConversationService:
             result = await adapter.invoke(
                 path, prompt, RESULT_SCHEMA, int(self.values.get("PRBOT_TASK_TIMEOUT", 3600))
             )
-            if result.get("outcome") == "completed" and not self.adapter:
+            if not self.adapter and (
+                result.get("outcome") == "completed"
+                or (result.get("pr_url") and result.get("outcome") != "needs_clarification")
+            ):
                 await self.verify_delivery(payload, result, token)
             text = self.clean(json.dumps(result, ensure_ascii=False))
             self.change(tid, "save_pending", text)
@@ -362,32 +367,82 @@ class ConversationService:
                     pass
 
     async def verify_delivery(self, payload, result, token):
-        from prbot.github import DeliveryError, GitHub
+        from prbot.github import CheckFailure, DeliveryError, GitHub
 
-        repo, kind, number = target_link(result.get("pr_url"), "Pull Request")
-        if repo.lower() != payload["repo"].lower():
-            raise ConfigError("Delivery PR does not belong to the requested repository.")
-        if payload["kind"] == "pull" and number != payload["number"]:
-            raise ConfigError("Delivery must reference the requested pull request.")
+        code_completed = result.get("outcome") == "completed"
+        delivery = {
+            "code": "completed_by_codex" if code_completed else "not_confirmed",
+            "pr": "unknown",
+            "issue": "not_applicable",
+            "ci": "unknown",
+            "detail": "",
+        }
+        result["delivery"] = delivery
+        result["outcome"] = "delivered_unverified"
+
+        def note(message):
+            delivery["detail"] = message
+            result["validation"] = message
+
+        try:
+            repo, kind, number = target_link(result.get("pr_url"), "Pull Request")
+            if repo.lower() != payload["repo"].lower():
+                raise ConfigError("Delivery PR does not belong to the requested repository.")
+            if payload["kind"] == "pull" and number != payload["number"]:
+                raise ConfigError("Delivery must reference the requested pull request.")
+        except ConfigError as error:
+            # Preserve the SDK report, but never present an unrelated PR as verified delivery.
+            delivery["pr"] = "invalid"
+            result["outcome"] = "failed"
+            note(str(error))
+            return
         github = GitHub(token)
+        if payload["kind"] == "issues":
+            delivery["issue"] = "unknown"
         try:
             pr = await github.request("GET", f"/repos/{repo}/pulls/{number}")
-            if pr.get("merged") or pr.get("state") != "open":
-                raise ConfigError("Delivery PR is not open for review.")
+            delivery["pr"] = "merged" if pr.get("merged") else pr.get("state", "unknown")
+            delivery["head_sha"] = pr["head"]["sha"]
+            if payload["kind"] == "issues":
+                try:
+                    issue = await github.request("GET", f"/repos/{repo}/issues/{payload['number']}")
+                    delivery["issue"] = issue.get("state", "unknown")
+                except DeliveryError:
+                    pass  # Still inspect CI; a missing issue read must not hide PR facts.
             required = tuple(
                 v.strip()
                 for v in str(self.values.get("PRBOT_REQUIRED_CHECKS", "test,dmg")).split(",")
                 if v.strip()
             )
-            if not required or not await github.checks(repo, pr["head"]["sha"], required):
-                raise ConfigError("Remote checks have not passed. Review the PR Checks tab.")
+            try:
+                passed = bool(required) and await github.checks(repo, pr["head"]["sha"], required)
+                delivery["ci"] = "passed" if passed else "pending"
+                note(
+                    "Required remote checks passed."
+                    if passed
+                    else "Required remote checks are pending or missing. Review the PR Checks tab."
+                )
+            except DeliveryError as error:
+                # Terminal failures and unavailable API responses are different facts.
+                delivery["ci"] = "failed" if isinstance(error, CheckFailure) else "unknown"
+                note(
+                    "Required remote checks failed. Review the PR Checks tab."
+                    if delivery["ci"] == "failed"
+                    else "Remote checks could not be read. Review the PR Checks tab."
+                )
             current = await github.request("GET", f"/repos/{repo}/pulls/{number}")
+            delivery["pr"] = "merged" if current.get("merged") else current.get("state", "unknown")
             if current["head"]["sha"] != pr["head"]["sha"]:
-                raise ConfigError("PR changed during verification. Recheck the latest commit.")
-        except DeliveryError:
-            raise ConfigError(
-                "GitHub delivery could not be verified. Review the PR Checks tab."
-            ) from None
+                delivery["ci"] = "pending"
+                note("PR changed during verification. Recheck the latest commit.")
+            if delivery["pr"] != "open":
+                note("Delivery PR is not open for review. " + delivery["detail"])
+            elif payload["kind"] == "issues" and delivery["issue"] != "closed":
+                note("Target issue is " + delivery["issue"] + ". " + delivery["detail"])
+            elif delivery["ci"] == "passed" and code_completed:
+                result["outcome"] = "completed"
+        except (DeliveryError, KeyError, TypeError):
+            note("GitHub delivery could not be fully verified. Review the PR and Checks tab.")
         finally:
             await github.close()
 

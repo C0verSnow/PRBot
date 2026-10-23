@@ -5,6 +5,7 @@ import httpx
 import pytest
 
 from prbot.config import Config, ConfigError, read_env, save_settings
+from prbot.config import env_path as env_path_before_fixture
 from prbot.execution_setup import codex_login
 from prbot.paths import data_dir
 
@@ -183,3 +184,38 @@ def test_refreshed_login_retained_without_overwriting_manual_id(tmp_path, monkey
     assert json.loads(codex_login())["tokens"]["id_token"] == "manual-id"
     assert json.loads(codex_login())["tokens"]["access_token"] == "next-access"
     assert path.read_text() == refreshed
+
+
+def test_existing_legacy_bootstrap_is_preserved_without_creating_extra_root(tmp_path, monkeypatch):
+    from prbot import config
+    from prbot.task_config import select_work_root
+
+    folder = tmp_path / "selected"
+    legacy = folder / "PRBot-workspaces"
+    legacy.mkdir(parents=True)
+    old = legacy / ".env"
+    original = "# keep exact content\nINFISICAL_CLIENT_SECRET=' keep spaces '\n"
+    old.write_text(original)
+    old.chmod(0o600)
+    config.save_settings({"PRBOT_WORK_ROOT": str(folder)})
+    monkeypatch.setattr(config, "env_path", env_path_before_fixture)
+    assert config.workspace_directory() == folder
+    assert config.env_path() == old
+    select_work_root(str(folder))
+    assert config.env_path() == folder / ".env"
+    assert (folder / ".env").read_text() == original
+    assert (folder / ".env").stat().st_mode & 0o777 == 0o600
+    assert old.read_text() == original
+    (folder / ".env").write_text("INFISICAL_CLIENT_SECRET=newer\n")
+    select_work_root(str(folder))
+    assert (folder / ".env").read_text() == "INFISICAL_CLIENT_SECRET=newer\n"
+
+
+def test_workspace_environment_override_is_reported_consistently(tmp_path, monkeypatch):
+    from prbot import service
+    from prbot.config import workspace_directory
+
+    monkeypatch.setenv("PRBOT_WORK_ROOT", str(tmp_path))
+    monkeypatch.setattr(service, "launchctl", lambda *a, **k: Mock(returncode=1))
+    assert workspace_directory() == tmp_path
+    assert service.status()["workspace_root"] == str(tmp_path)

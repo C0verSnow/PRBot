@@ -152,7 +152,7 @@ def workspace_directory():
         selected = Path(selected).expanduser()
         if not selected.is_absolute() or not selected.is_dir():
             raise ConfigError("Working directory unavailable. Choose a folder in Settings.")
-        folder = selected / "PRBot-workspaces"
+        folder = selected
     else:
         folder = data_dir() / "workspaces"
     if folder.is_symlink():
@@ -161,7 +161,16 @@ def workspace_directory():
 
 
 def env_path():
-    return workspace_directory() / ".env"
+    folder = workspace_directory()
+    current = folder / ".env"
+    legacy = folder / "PRBot-workspaces" / ".env"
+    # Existing installations can keep reading their original private bootstrap file.
+    # Never create the legacy directory or overwrite an existing root configuration.
+    if not current.exists() and not current.is_symlink() and legacy.exists():
+        if legacy.parent.is_symlink():
+            raise ConfigError("Legacy configuration directory cannot be a symlink.")
+        return legacy
+    return current
 
 
 def prepare_env_directory(folder=None):
@@ -176,6 +185,13 @@ def prepare_env_directory(folder=None):
             else Path(__file__).resolve().parents[2] / ".env.example"
         )
         template = source.read_text()
+        legacy = folder / "PRBot-workspaces" / ".env"
+        legacy_content = None
+        if not (folder / ".env").exists() and legacy.exists():
+            if legacy.parent.is_symlink():
+                raise ConfigError("Legacy configuration directory cannot be a symlink.")
+            read_env(legacy)  # Validate permissions and structure before copying any credentials.
+            legacy_content = legacy.read_text()
         for name in (".env.example", ".env"):
             target = folder / name
             if target.is_symlink():
@@ -184,7 +200,11 @@ def prepare_env_directory(folder=None):
                 )
             if not target.exists():
                 with open(target, "x", opener=lambda p, flags: os.open(p, flags, 0o600)) as out:
-                    out.write(template)
+                    out.write(
+                        legacy_content
+                        if name == ".env" and legacy_content is not None
+                        else template
+                    )
         return folder / ".env"
     except OSError:
         raise ConfigError("Cannot prepare .env. Check working directory permissions.") from None

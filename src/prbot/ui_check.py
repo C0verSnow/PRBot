@@ -147,6 +147,66 @@ true;
   document.querySelector('[data-view="Issue"]').click();
   await tick();
   assert(document.getElementById('draft').value.includes('documentation'));
+  // Hold bridge responses to reproduce polling, double-click and heartbeat races.
+  const field = id => document.getElementById(id);
+  const waitFor = async predicate => {
+    for (let count = 0; count < 300; count++) { if (predicate()) return; await tick(); }
+    throw new Error('Native response timed out');
+  };
+  await waitFor(() => !field('send').disabled);
+  const handler = window.webkit.messageHandlers.prbot;
+  const originalPost = handler.postMessage;
+  const requests = [];
+  handler.postMessage = body => { requests.push(body); };
+  const complete = action => window.receiveNative({ok:true, busy:false, completed_action:action});
+  try {
+    for (let length = 1; length <= 7; length++) {
+      edit(field('draft'), 'x'.repeat(length)); await tick();
+      assert(!field('send').disabled, 'Short description rejected');
+    }
+    edit(field('draft'), '   '); await tick();
+    assert(field('send').disabled, 'Whitespace description accepted');
+    edit(field('draft'), 'fix'); await tick();
+    const labels = [];
+    const observer = new MutationObserver(() => labels.push(field('send').textContent));
+    observer.observe(field('send'), {subtree:true, childList:true, characterData:true});
+    await waitFor(() => requests.some(request => request.action === 'tasks'));
+    assert(field('send').textContent === 'Send', 'Polling changed Send label');
+    complete('tasks'); await tick();
+    assert(!labels.includes('Submitting…'), 'Polling flickered submission label');
+    observer.disconnect();
+    field('composer').requestSubmit(); field('composer').requestSubmit(); await tick();
+    assert(requests.filter(request => request.action === 'submit_message').length === 1,
+      'Double click submitted twice');
+    assert(field('send').textContent === 'Submitting…', 'Missing submit progress');
+    window.receiveNative({ok:true, busy:false, status:{state:'stopped'}}); await tick();
+    assert(field('send').textContent === 'Submitting…', 'Heartbeat released submit lock');
+    complete('tasks'); await tick();
+    assert(field('send').textContent === 'Submitting…', 'Other response released submit lock');
+    window.receiveNative({ok:false, busy:false, completed_action:'submit_message',
+      message:'Message not saved. Retry.'}); await tick();
+    assert(field('send').textContent === 'Send' && !field('send').disabled);
+    assert(field('draft').value === 'fix', 'Failed submit lost draft');
+    field('composer').requestSubmit(); await tick();
+    const submitted = requests.filter(request => request.action === 'submit_message');
+    assert(submitted.length === 2 && submitted[0].request_id === submitted[1].request_id,
+      'Retry lost idempotency key');
+    const report = JSON.stringify({summary:'Implemented', outcome:'delivered_unverified',
+      pr_url:'https://github.com/owner/repo/pull/1', validation:'Required remote checks failed.',
+      delivery:{code:'completed_by_codex',pr:'open',issue:'closed',ci:'failed'}});
+    const task = {id:submitted[1].request_id,mode:'Issue',status:'delivered_unverified',
+      conversation_id:'ui',created_at:1,result:report};
+    window.receiveNative({ok:true,busy:false,completed_action:'submit_message',accepted:task,tasks:[task]});
+    await tick();
+    assert(field('draft').value === '', 'Accepted submission did not clear draft');
+    assert(document.querySelector('[aria-label="Task status"]').textContent.includes(
+      'Delivered · verification incomplete'), 'Delivery is hidden by generic failure');
+    const facts = document.querySelector('[aria-label="Delivery facts"]').textContent;
+    assert(facts.includes('open') && facts.includes('closed') && facts.includes('failed'),
+      'Separate delivery facts missing');
+    complete('history'); await tick();
+  } finally { handler.postMessage = originalPost; }
+  edit(field('draft'), 'Create documentation and explain acceptance criteria'); await tick();
   document.getElementById('user').click();
   await tick();
   assert(document.getElementById('settings').open);
@@ -155,11 +215,6 @@ true;
   const buttons = Array.from(document.querySelectorAll('.workspace-row button'));
   assert(buttons[0].getBoundingClientRect().width === buttons[1].getBoundingClientRect().width);
   assert(buttons[0].getBoundingClientRect().right === buttons[1].getBoundingClientRect().right);
-  const field = id => document.getElementById(id);
-  const waitFor = async predicate => {
-    for (let count = 0; count < 300; count++) { if (predicate()) return; await tick(); }
-    throw new Error('Settings native response timed out');
-  };
   const select = async name => {
     const button = document.querySelector('[data-section="' + name + '"]');
     await waitFor(() => !button.disabled); button.click(); await tick();

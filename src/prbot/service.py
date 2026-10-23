@@ -92,13 +92,9 @@ def status():
         last = json.loads(path.read_text())
     except (OSError, ValueError):
         last = {}
-    from prbot.config import read_settings
+    from prbot.config import env_path, workspace_directory
 
-    selected = read_settings().get("PRBOT_WORK_ROOT")
-    workspace = (
-        str(Path(selected) / "PRBot-workspaces") if selected else str(data_dir() / "workspaces")
-    )
-    from prbot.config import env_path
+    workspace = str(workspace_directory())
 
     return {
         "env_file": str(env_path()),
