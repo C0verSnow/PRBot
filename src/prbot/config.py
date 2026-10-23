@@ -61,7 +61,9 @@ def bootstrap_form(configuration=None):
     """Expose only non-secret fields and a boolean; never send the saved secret to WebKit."""
     values = bootstrap_values(configuration)
     return {
-        "values": {k: values.get(k, "") for k in sorted(ENV_KEYS) if k != "INFISICAL_CLIENT_SECRET"},
+        "values": {
+            k: values.get(k, "") for k in sorted(ENV_KEYS) if k != "INFISICAL_CLIENT_SECRET"
+        },
         "client_secret_set": bool(values.get("INFISICAL_CLIENT_SECRET")),
         "environment_overrides": sorted(k for k in ENV_KEYS if k in os.environ),
         "path": str(env_path() if configuration is None else configuration),
@@ -85,7 +87,7 @@ def save_bootstrap_form(values, expected_path):
             not isinstance(value, str)
             or len(value) > 20000
             or any(ord(c) < 32 or ord(c) == 127 for c in value)
-            or "\"" in value
+            or '"' in value
             or "'" in value
         ):
             raise ConfigError(key + " must be a single line without quotes or control characters.")
@@ -102,7 +104,9 @@ def save_bootstrap_form(values, expected_path):
     for candidate in (cleaned, effective):
         if candidate["INFISICAL_URL"]:
             validate_infisical_url(candidate["INFISICAL_URL"])
-        if candidate["INFISICAL_SECRET_PATH"] and not candidate["INFISICAL_SECRET_PATH"].startswith("/"):
+        if candidate["INFISICAL_SECRET_PATH"] and not candidate["INFISICAL_SECRET_PATH"].startswith(
+            "/"
+        ):
             raise ConfigError("INFISICAL_SECRET_PATH must start with /.")
     temporary = None
     try:
@@ -120,8 +124,10 @@ def save_bootstrap_form(values, expected_path):
             out.flush()
             os.fsync(out.fileno())
         # Do not overwrite a workspace switch or an external editor's newer file.
-        if env_path() != path or path.is_symlink() or (
-            (path.read_text() if path.exists() else None) != original
+        if (
+            env_path() != path
+            or path.is_symlink()
+            or ((path.read_text() if path.exists() else None) != original)
         ):
             raise ConfigError("Configuration changed while saving. Reload and retry.")
         os.replace(temporary, path)

@@ -17,7 +17,11 @@ def asset_directory():
 
 
 SETTINGS_ACTIONS = {
-    "connections", "use_id_token", "fetch_codex_id_token", "configuration", "save_configuration"
+    "connections",
+    "use_id_token",
+    "fetch_codex_id_token",
+    "configuration",
+    "save_configuration",
 }
 
 
@@ -169,15 +173,19 @@ def show(check_output=None):
             if self.web.URL() is None or self.web.URL().path() != str(self.page):
                 return
             body = message.body()
-            allowed = ACTIONS | SETTINGS_ACTIONS | {
-                "ready",
-                "open_github",
-                "refresh_service",
-                "submit_message",
-                "history",
-                "retry_save",
-                "tasks",
-            }
+            allowed = (
+                ACTIONS
+                | SETTINGS_ACTIONS
+                | {
+                    "ready",
+                    "open_github",
+                    "refresh_service",
+                    "submit_message",
+                    "history",
+                    "retry_save",
+                    "tasks",
+                }
+            )
             if (
                 not hasattr(body, "get")
                 or not isinstance(body.get("action"), str)

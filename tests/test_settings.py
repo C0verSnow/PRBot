@@ -57,10 +57,20 @@ def test_fetch_reads_native_id_without_touching_login_or_infisical(tmp_path, mon
     network.assert_not_called()
 
 
-@pytest.mark.parametrize("auth", [None, [], {}, {"tokens": None},
-    {"tokens": {"access_token": id_token()}}, {"tokens": {"id_token": "plain-secret"}},
-    {"tokens": {"id_token": 123}}, {"tokens": {"id_token": "a.b.c"}},
-    {"tokens": {"id_token": "e30.e30.c2ln"}}])
+@pytest.mark.parametrize(
+    "auth",
+    [
+        None,
+        [],
+        {},
+        {"tokens": None},
+        {"tokens": {"access_token": id_token()}},
+        {"tokens": {"id_token": "plain-secret"}},
+        {"tokens": {"id_token": 123}},
+        {"tokens": {"id_token": "a.b.c"}},
+        {"tokens": {"id_token": "e30.e30.c2ln"}},
+    ],
+)
 def test_fetch_missing_or_invalid_never_returns_other_token(tmp_path, auth):
     if auth is not None:
         write_auth(tmp_path, auth)
@@ -96,13 +106,13 @@ def test_manual_use_is_independent_of_infisical(tmp_path, monkeypatch):
 
 def test_configuration_roundtrip_private_and_secret_never_exposed(tmp_path):
     path = tmp_path / ".env"
-    path.write_text('# keep comment\nOTHER_TOOL=value\nINFISICAL_CLIENT_SECRET=old-secret\n')
+    path.write_text("# keep comment\nOTHER_TOOL=value\nINFISICAL_CLIENT_SECRET=old-secret\n")
     path.chmod(0o600)
     values = fields()
     values["INFISICAL_CLIENT_SECRET"] = ""
-    message, reply = settings_request("save_configuration", {
-        "configuration": values, "configuration_path": str(path)
-    })
+    message, reply = settings_request(
+        "save_configuration", {"configuration": values, "configuration_path": str(path)}
+    )
     form = reply["configuration"]
     assert form == bootstrap_form()
     assert form["client_secret_set"]
@@ -130,16 +140,24 @@ def test_configuration_preserves_process_priority(tmp_path, monkeypatch):
     assert read_env()["INFISICAL_PROJECT_ID"] == "test-project"
 
 
-@pytest.mark.parametrize("key,value", [
-    ("INFISICAL_URL", "ftp://private-host"), ("INFISICAL_URL", "https://"),
-    ("INFISICAL_URL", "https://user:private-secret@host"),
-    ("INFISICAL_URL", "https://host:99999"), ("INFISICAL_URL", "https://host?secret=x"),
-    ("INFISICAL_URL", "https://host/#secret"), ("INFISICAL_CLIENT_ID", ""),
-    ("INFISICAL_CLIENT_SECRET", ""), ("INFISICAL_PROJECT_ID", ""),
-    ("INFISICAL_ENVIRONMENT", ""), ("INFISICAL_SECRET_PATH", "relative"),
-    ("INFISICAL_CLIENT_SECRET", "private-secret\nINJECT=value"),
-    ("INFISICAL_CLIENT_SECRET", "'private-secret'"),
-])
+@pytest.mark.parametrize(
+    "key,value",
+    [
+        ("INFISICAL_URL", "ftp://private-host"),
+        ("INFISICAL_URL", "https://"),
+        ("INFISICAL_URL", "https://user:private-secret@host"),
+        ("INFISICAL_URL", "https://host:99999"),
+        ("INFISICAL_URL", "https://host?secret=x"),
+        ("INFISICAL_URL", "https://host/#secret"),
+        ("INFISICAL_CLIENT_ID", ""),
+        ("INFISICAL_CLIENT_SECRET", ""),
+        ("INFISICAL_PROJECT_ID", ""),
+        ("INFISICAL_ENVIRONMENT", ""),
+        ("INFISICAL_SECRET_PATH", "relative"),
+        ("INFISICAL_CLIENT_SECRET", "private-secret\nINJECT=value"),
+        ("INFISICAL_CLIENT_SECRET", "'private-secret'"),
+    ],
+)
 def test_configuration_validation_failure_preserves_original(tmp_path, key, value):
     path = tmp_path / ".env"
     path.write_text("# untouched\n")
@@ -163,7 +181,9 @@ def test_configuration_write_failure_preserves_original_and_cleans_temp(tmp_path
     path = tmp_path / ".env"
     path.write_text("# untouched\n")
     path.chmod(0o600)
-    monkeypatch.setattr("prbot.config.os.replace", Mock(side_effect=PermissionError("test-secret-only")))
+    monkeypatch.setattr(
+        "prbot.config.os.replace", Mock(side_effect=PermissionError("test-secret-only"))
+    )
     with pytest.raises(ConfigError, match="write permissions") as error:
         save_bootstrap_form(fields(), str(path))
     assert "test-secret-only" not in str(error.value)

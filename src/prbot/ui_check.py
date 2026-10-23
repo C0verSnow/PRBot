@@ -2,8 +2,8 @@
 
 import base64
 import json
-from pathlib import Path
 import os
+from pathlib import Path
 
 
 def schedule_check(web, output):
@@ -14,11 +14,14 @@ def schedule_check(web, output):
     # The ui-check entry point has already selected a disposable HOME.
     auth_path = Path.home() / ".codex/auth.json"
     auth_path.parent.mkdir(mode=0o700)
+
     def encode(value):
         return base64.urlsafe_b64encode(json.dumps(value).encode()).decode().rstrip("=")
 
     fixture_token = encode({"alg": "RS256"}) + "." + encode({"sub": "ui-test"}) + ".c2ln"
-    original_auth = json.dumps({"tokens": {"id_token": fixture_token, "access_token": "ui-access-only"}})
+    original_auth = json.dumps(
+        {"tokens": {"id_token": fixture_token, "access_token": "ui-access-only"}}
+    )
     auth_path.write_text(original_auth)
     auth_path.chmod(0o600)
     finished = False
@@ -152,6 +155,7 @@ true;
   const buttons = Array.from(document.querySelectorAll('.workspace-row button'));
   assert(buttons[0].getBoundingClientRect().width === buttons[1].getBoundingClientRect().width);
   assert(buttons[0].getBoundingClientRect().right === buttons[1].getBoundingClientRect().right);
+  const field = id => document.getElementById(id);
   const waitFor = async predicate => {
     for (let count = 0; count < 300; count++) { if (predicate()) return; await tick(); }
     throw new Error('Settings native response timed out');
@@ -161,43 +165,48 @@ true;
     await waitFor(() => !button.disabled); button.click(); await tick();
   };
   await select('Connections');
-  const fetchToken = document.getElementById('fetch-codex-id-token');
+  const fetchToken = field('fetch-codex-id-token');
   await waitFor(() => !fetchToken.disabled); fetchToken.click(); await tick();
   await waitFor(() => !fetchToken.disabled);
-  assert(document.getElementById('id-token').value.startsWith('eyJ'), 'Fetch did not fill ID token');
-  const fetched = document.getElementById('id-token').value;
-  edit(document.getElementById('id-token'), 'ui-manual-id'); await tick();
-  window.receiveNative({ok:false, message:'Cannot read Codex credentials. Check read permissions.'});
+  assert(field('id-token').value.startsWith('eyJ'), 'Fetch did not fill ID token');
+  const fetched = field('id-token').value;
+  edit(field('id-token'), 'ui-manual-id'); await tick();
+  window.receiveNative({ok:false, message:'Cannot read Codex credentials. Check permissions.'});
   await tick();
-  assert(document.getElementById('id-token').value === 'ui-manual-id', 'Fetch failure lost ID draft');
-  const useToken = () => Array.from(document.querySelectorAll('button')).find(b => b.textContent === 'Use token');
+  assert(field('id-token').value === 'ui-manual-id', 'Fetch failure lost ID draft');
+  const useToken = () => Array.from(document.querySelectorAll('button'))
+    .find(b => b.textContent === 'Use token');
   useToken().click(); await tick(); await waitFor(() => !fetchToken.disabled);
-  assert(document.getElementById('id-token').value === 'ui-manual-id', 'Manual apply lost ID token');
+  assert(field('id-token').value === 'ui-manual-id', 'Manual apply lost ID token');
   assert(useToken().disabled, 'Applied ID token still dirty');
   fetchToken.click(); await tick(); await waitFor(() => !fetchToken.disabled);
-  assert(document.getElementById('id-token').value === fetched, 'Fetch returned manual override');
+  assert(field('id-token').value === fetched, 'Fetch returned manual override');
   useToken().click(); await tick(); await waitFor(() => !fetchToken.disabled);
   await select('Configuration');
-  await waitFor(() => document.getElementById('INFISICAL_URL') && !document.getElementById('INFISICAL_URL').disabled);
-  assert(document.getElementById('INFISICAL_CLIENT_SECRET').type === 'password', 'Secret is visible');
+  await waitFor(() => field('INFISICAL_URL') && !field('INFISICAL_URL').disabled);
+  assert(field('INFISICAL_CLIENT_SECRET').type === 'password', 'Secret is visible');
   const values = {INFISICAL_URL:'http://127.0.0.1:1', INFISICAL_CLIENT_ID:'ui-client',
     INFISICAL_CLIENT_SECRET:'ui-secret-only', INFISICAL_PROJECT_ID:'ui-project',
     INFISICAL_ENVIRONMENT:'dev', INFISICAL_SECRET_PATH:'/'};
-  for (const [key,value] of Object.entries(values)) { edit(document.getElementById(key), value); await tick(); }
+  for (const [key,value] of Object.entries(values)) {
+    edit(field(key), value); await tick();
+  }
   await select('Workspace'); await select('Configuration');
-  assert(document.getElementById('INFISICAL_CLIENT_SECRET').value === 'ui-secret-only', 'Navigation lost unsaved configuration');
-  window.receiveNative({ok:false, message:'Cannot save Infisical configuration. Check directory write permissions.'});
+  assert(field('INFISICAL_CLIENT_SECRET').value === 'ui-secret-only',
+    'Navigation lost unsaved configuration');
+  window.receiveNative({ok:false, message:'Cannot save configuration. Check write permissions.'});
   await tick();
-  assert(document.getElementById('INFISICAL_CLIENT_SECRET').value === 'ui-secret-only', 'Save failure lost draft');
-  document.getElementById('save-configuration').click(); await tick();
-  await waitFor(() => !document.getElementById('INFISICAL_URL').disabled);
-  assert(document.getElementById('save-configuration').disabled, 'Configuration not saved');
-  assert(document.getElementById('INFISICAL_CLIENT_SECRET').value === '', 'Secret echoed after save');
-  assert(document.getElementById('INFISICAL_CLIENT_SECRET').placeholder.includes('Configured'), 'Missing secret state');
+  assert(field('INFISICAL_CLIENT_SECRET').value === 'ui-secret-only', 'Save failure lost draft');
+  field('save-configuration').click(); await tick();
+  await waitFor(() => !field('INFISICAL_URL').disabled);
+  assert(field('save-configuration').disabled, 'Configuration not saved');
+  assert(field('INFISICAL_CLIENT_SECRET').value === '', 'Secret echoed after save');
+  assert(field('INFISICAL_CLIENT_SECRET').placeholder.includes('Configured'),
+    'Missing secret state');
   await select('Workspace'); await select('Configuration');
-  await waitFor(() => !document.getElementById('INFISICAL_URL').disabled);
-  assert(document.getElementById('INFISICAL_PROJECT_ID').value === 'ui-project', 'Saved project not restored');
-  assert(document.getElementById('INFISICAL_CLIENT_SECRET').value === '', 'Saved secret exposed');
+  await waitFor(() => !field('INFISICAL_URL').disabled);
+  assert(field('INFISICAL_PROJECT_ID').value === 'ui-project', 'Saved project not restored');
+  assert(field('INFISICAL_CLIENT_SECRET').value === '', 'Saved secret exposed');
   await select('Background Service');
   await tick();
   assert(document.querySelectorAll('#service-power').length === 1);
