@@ -252,3 +252,10 @@ def test_short_token_values_are_redacted_before_journaling(app):
     app.event("task", "text", "private value: tiny")
     with app.db() as db:
         assert "tiny" not in db.execute("SELECT text FROM task_events").fetchone()[0]
+
+
+def test_json_escaped_credentials_are_redacted_before_archive(app):
+    secret = 'a-private-"secret\nvalue'
+    app.values["SERVICE_TOKEN"] = secret
+    encoded = app.clean(json.dumps({"summary": "value: " + secret}))
+    assert json.loads(encoded)["summary"] == "value: [REDACTED]"

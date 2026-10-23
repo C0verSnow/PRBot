@@ -128,11 +128,17 @@ class ConversationService:
             sensitive.extend(auth.get("tokens", {}).values())
         except ConfigError:
             pass
-        for value in sorted(
-            {value for value in sensitive if isinstance(value, str) and value},
-            key=len,
-            reverse=True,
-        ):
+        variants = {
+            variant
+            for value in sensitive
+            if isinstance(value, str) and value
+            for variant in (
+                value,
+                json.dumps(value, ensure_ascii=False)[1:-1],
+                json.dumps(value, ensure_ascii=True)[1:-1],
+            )
+        }
+        for value in sorted(variants, key=len, reverse=True):
             text = text.replace(value, "[REDACTED]")
         return redact(text, secrets)
 

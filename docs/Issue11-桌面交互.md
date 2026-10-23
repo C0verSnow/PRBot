@@ -6,7 +6,7 @@
 
 | 需求 | 修改位置 | 实现及边界 |
 | --- | --- | --- |
-| FR-01 执行反馈、回答、历史 | `src/prbot/sdk_worker.py:27`、`:48`，`codex_adapter.py:115`，`conversation_service.py:148`、`:242`、`:263`、`:327`、`:364`、`:520`，`desktop.py:275`，`frontend/src/App.tsx:12`、`components/TaskFeed.tsx:4` | Worker 输出 v1 NDJSON；控制器逐行处理；只允许状态、过滤后的助理说明和明确问题。原任务保存提问和多轮答案、重启恢复、回答幂等和 actor/source 校验。Chat History 独立浏览三类历史及具体会话；私人聊天使用只读沙箱，不注入 GitHub Token、不进入交付验证。 |
+| FR-01 执行反馈、回答、历史 | `src/prbot/sdk_worker.py:27`、`:48`，`codex_adapter.py:115`，`conversation_service.py:154`、`:248`、`:269`、`:333`、`:370`、`:526`，`desktop.py:275`，`frontend/src/App.tsx:12`、`components/TaskFeed.tsx:4` | Worker 输出 v1 NDJSON；控制器逐行处理；只允许状态、过滤后的助理说明和明确问题。原任务保存提问和多轮答案、重启恢复、回答幂等和 actor/source 校验。Chat History 独立浏览三类历史及具体会话；私人聊天使用只读沙箱，不注入 GitHub Token、不进入交付验证。 |
 | FR-02 输出位置、顺序、滚动 | `frontend/src/App.tsx:68`，`components/TaskFeed.tsx:4`，`style.css:51` | 输入框在执行区上方；事件有时间和稳定序号。查看旧日志不自动跳底，在底部附近才跟随。消息已在历史展示时不重复展示同一最终结果。 |
 | FR-03 图标 | `frontend/src/components/Icon.tsx:2`、`Sidebar.tsx:5`、`EmptyState.tsx:8` | 统一 24×24 SVG、1.6 线宽和 currentColor。Issue 用圆形问题图标、PR 用分支连线、品牌用机器人。只更新界面品牌；检查 `packaging/PRBot.spec` 确认前端资源随包，未修改 Dock / Finder 图标。 |
 | FR-04 原生粘贴 | `src/prbot/desktop.py:351`，`frontend/src/bridge.ts:3`，`components/SettingsPanel.tsx:63`，`src/prbot/ui_check.py:129` | 原生窗口加入标准 Edit 菜单，通过响应链分派 Cmd+V / Cmd+C / Cmd+X / Cmd+A；后台请求不再禁用输入框。远端实际验证文本、密码、URL 和多行控件粘贴后的 React 值及焦点。 |
@@ -30,7 +30,7 @@
 
 - [首轮远端 CI 39974242241](https://github.com/C0verSnow/PRBot/actions/runs/39974242241)：前端检查和构建通过；183 个 Python 通过、1 个既有交付测试失败。失败暴露新增类型判断与适配器工厂替身不兼容，已移除该类型耦合，保留原测试断言。
 - [远端 CI 39974450225](https://github.com/C0verSnow/PRBot/actions/runs/39974450225)：184 个 Python 测试、前端检查/构建、源码及安装包真实 WebKit、DMG 挂载复制和嵌入运行时均通过。已下载源码 UI JSON 核对 `ok=true` 并查看截图。
-- 后续补充了 Worker 实际事件筛选测试、跨动作旧任务快照保护、历史切换请求排队、日志滚动和回答任务归属的 WebKit 验证。最终交付提交继续由同一 PR 的 required test / dmg 检查验证，以 PR Checks 为准。
+- 后续补充了 Worker 实际事件筛选测试、跨动作旧任务快照保护、历史切换请求排队、日志滚动和回答任务归属的 WebKit 验证。[功能验证 CI 39976685682](https://github.com/C0verSnow/PRBot/actions/runs/39976685682) 的 test / dmg 全通过：187 项 Python、前端检查构建、源码及安装包 WebKit、DMG 挂载复制和内嵌运行时。已下载并检查安装包 UI JSON 及三张截图。最后附加 JSON 转义凭据过滤回归，交付提交继续由同一 PR 的 required test / dmg 验证，以 PR Checks 为准。
 
 自动化覆盖：原目标及同任务回答、其他 actor/source 拒绝访问、重复回答、归档失败不继续、重启后等待状态、不同轮次结果不覆盖、私人聊天不调用 GitHub 验证、超时分类、事件凭据过滤、输出数量限制、最终结果前收到事件、真实 SDK 初始化和已有 GitHub / Telegram 回归。
 
@@ -42,7 +42,7 @@
 
 ![改动前的任务与输入区域](images/pr10-delivery.png)
 
-改动后的真实安装包 WebKit 截图（`2a2d54e`，CI 39975518137）：已核对工件 `PRBot-ui.json` 为 `ok=true`；该次任务在安装包检查收尾阶段因新提交取消，截图证明窗口交互，不将整轮 CI 算通过。后续 SDK 元数据处理修改没有改变界面。
+改动后的真实安装包 WebKit 截图（`7b64318`，[CI 39976685682](https://github.com/C0verSnow/PRBot/actions/runs/39976685682) 的 test / dmg 全通过，工件 `PRBot-ui.json` 为 `ok=true`）：
 
 ![改动后首页与导航](images/issue11-home.png)
 
