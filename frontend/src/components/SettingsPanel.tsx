@@ -61,19 +61,19 @@ export function SettingsPanel({ open, onClose, busy, result, send }: Props) {
   const powerLabel = state === 'starting' ? 'Starting service' : state === 'stopping' ? 'Stopping service' : uncertain ? 'Refresh status' : active ? 'Stop service' : 'Start service';
   const choose = (value: typeof section) => {
     setSection(value);
-    if (value === 'Connections' && !dirty) send('connections');
-    if (value === 'Configuration' && !configurationDirty) send('configuration');
+    if (value === 'Connections' && !dirty && !result.connections) send('connections');
+    if (value === 'Configuration' && !configurationDirty && !result.configuration) send('configuration');
   };
   return <dialog ref={dialog} id="settings" aria-labelledby="settings-title" className="settings-dialog" onCancel={e => { e.preventDefault(); close(); }} onClose={() => { document.getElementById('user')?.focus(); onClose(); }}>
-    <header className="flex items-center justify-between border-b border-line px-6 py-5"><h2 id="settings-title" className="font-serif text-2xl">Settings</h2><button id="close-settings" aria-label="Close settings" className="text-2xl" onClick={close}>×</button></header>
-    <div className="settings-body"><nav aria-label="Settings sections" className="settings-nav">{sections.map(value => <button key={value} disabled={busy} data-section={value} className={`nav-item mb-1 ${section === value ? 'bg-[#eae8e2]' : ''}`} aria-current={section === value ? 'page' : undefined} onClick={() => choose(value)}>{value}</button>)}</nav>
+    <header className="flex items-center justify-between border-b border-line px-6 py-5"><h2 id="settings-title" className="font-serif text-2xl">Settings</h2><button id="close-settings" aria-label="Close settings" className="close-settings" onClick={close}>×</button></header>
+    <div className="settings-body"><nav aria-label="Settings sections" className="settings-nav">{sections.map(value => <button key={value} data-section={value} className={`nav-item mb-1 ${section === value ? 'bg-[#eae8e2]' : ''}`} aria-current={section === value ? 'page' : undefined} onClick={() => choose(value)}>{value}</button>)}</nav>
       <div className="settings-content">
         {section === 'Workspace' && <section><h3 className="mb-7 text-lg font-medium">Workspace</h3>
           <div className="workspace-row"><div><h4>Working directory</h4><p>{result.status?.workspace || 'Not selected'}</p></div><button data-action="choose_workspace" className="secondary" disabled={busy} onClick={() => send('choose_workspace')}>Choose folder</button></div>
           <div className="workspace-row"><div><h4>Configuration directory</h4><p>{result.status?.configuration || 'Application configuration'}</p></div><button data-action="open_configuration" className="secondary" disabled={busy} onClick={() => send('open_configuration')}>Open folder</button></div>
         </section>}
         {section === 'Connections' && <section><h3 className="mb-7 text-lg font-medium">Connections</h3><p className="mb-5 text-sm">Infisical: {result.connections?.infisical || 'Not connected'}{result.connections ? ` · ${result.connections.project}` : ''}</p>
-          <label htmlFor="id-token" className="mb-2 block font-medium">Codex id_token</label><input id="id-token" disabled={busy} type="text" value={token} autoComplete="off" spellCheck={false} onChange={e => { setToken(e.target.value); setDirty(true); }} placeholder="Sign in with Codex, then refresh" className="w-full rounded-lg border border-line bg-white px-3 py-2" />
+          <label htmlFor="id-token" className="mb-2 block font-medium">Codex id_token</label><input id="id-token" type="password" value={token} autoComplete="off" spellCheck={false} onChange={e => { setToken(e.target.value); setDirty(true); }} placeholder="Sign in with Codex, then refresh" className="w-full rounded-lg border border-line bg-white px-3 py-2" />
           <p className="my-3 text-xs leading-6 text-muted">Read from ~/.codex/auth.json. The complete sign-in is used for SDK authentication. Fetch only reads the local ID token; it does not sign in or refresh credentials. Choose Use token to apply edits to new tasks in this window.</p>
           <div className="flex flex-wrap gap-2"><button id="fetch-codex-id-token" className="secondary" disabled={busy} onClick={() => send('fetch_codex_id_token')}>Fetch Codex ID Token</button><button className="secondary" disabled={busy || dirty} onClick={() => send('connections')}>Refresh connections</button><button className="secondary" disabled={busy || !dirty || !token.trim()} onClick={() => { send('use_id_token', { text: token }); }}>Use token</button></div>
           <p className="mt-8 text-xs leading-6 text-muted">Telegram and Redis secrets are managed in Infisical. GitHub uses the host Git sign-in or Infisical. No subscription tier check is performed.</p>

@@ -1,50 +1,61 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Action, NativeResult, SendAction } from './types';
+const background = new Set<Action>(['ready', 'tasks', 'history', 'connections', 'configuration']);
 export function useNativeBridge() {
   const [result, setResult] = useState<NativeResult>({ ok: true });
   const [busy, setBusy] = useState(false);
-  const pending = useRef(false);
-  const activeAction = useRef<Action | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const pending = useRef(new Map<Action, number>());
+  const serial = useRef(0);
+  const active = useRef<Action | null>(null);
   const send = useCallback<SendAction>((action, data = {}) => {
-    if (pending.current && action !== 'ready') return;
+    if (pending.current.has(action) || (!background.has(action) && active.current)) return;
     const handler = window.webkit?.messageHandlers.prbot;
     if (!handler) {
       setResult(previous => ({ ...previous, ok: false, message: 'Open PRBot for macOS to use this feature.' }));
       return;
     }
-    if (action !== 'ready') {
-      pending.current = true;
-      activeAction.current = action;
-      setBusy(true);
-      setSubmitting(action === 'submit_message');
+    const bridge_id = ++serial.current;
+    pending.current.set(action, bridge_id);
+    if (!background.has(action)) {
+      active.current = action; setBusy(true);
+      setSubmitting(action === 'submit_message' || action === 'answer');
     }
-    try { handler.postMessage({ action, ...data }); }
+    try { handler.postMessage({ action, ...data, bridge_id }); }
     catch {
-      pending.current = false; activeAction.current = null;
-      setBusy(false); setSubmitting(false);
+      pending.current.delete(action);
+      if (active.current === action) { active.current = null; setBusy(false); setSubmitting(false); }
       setResult(previous => ({ ...previous, ok: false, message: 'Request could not be sent. Retry.' }));
     }
   }, []);
   useEffect(() => {
     let lastReport = Date.now();
     const receive = (payload: NativeResult) => {
+      const action = payload.completed_action;
+      if (action && payload.bridge_id !== undefined && pending.current.get(action) !== payload.bridge_id) return;
       if (payload.status) lastReport = Date.now();
-      if (payload.completed_action === activeAction.current) activeAction.current = null;
-      pending.current = activeAction.current !== null || !!payload.busy;
-      setBusy(pending.current);
-      setSubmitting(activeAction.current === 'submit_message');
-      setResult(previous => ({ ...previous, ...payload,
-        message: payload.message ?? previous.message,
-        ok: payload.message ? payload.ok : previous.ok,
-      }));
+      if (action) pending.current.delete(action);
+      if (action === active.current) { active.current = null; setBusy(false); setSubmitting(false); }
+      setResult(previous => {
+        const next = { ...previous };
+        for (const [key, value] of Object.entries(payload)) {
+          if (['busy', 'completed_action', 'bridge_id'].includes(key) || value == null) continue;
+          if (key === 'ok' && !payload.message) continue;
+          // Keep object identity for unchanged status, tasks and configuration responses.
+          // Explicit token actions still need to apply even if their value is unchanged.
+          if (key === 'id_token_result' || JSON.stringify(previous[key as keyof NativeResult]) !== JSON.stringify(value)) {
+            Object.assign(next, { [key]: value });
+          }
+        }
+        return Object.keys(next).some(key => next[key as keyof NativeResult] !== previous[key as keyof NativeResult]) ? next : previous;
+      });
     };
     window.receiveNative = receive;
     send('ready');
     const timer = window.setInterval(() => {
-      if (Date.now() - lastReport > 15000) setResult(previous => ({ ...previous,
+      if (Date.now() - lastReport > 15000) setResult(previous => previous.status?.state === 'stale' ? previous : ({ ...previous,
         status: { ...previous.status, state: 'stale' } }));
-      if (!pending.current) send('ready');
+      send('ready');
     }, 3000);
     return () => { window.clearInterval(timer); if (window.receiveNative === receive) delete window.receiveNative; };
   }, [send]);

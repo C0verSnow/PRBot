@@ -65,6 +65,8 @@ def redact(text, secrets):
     text = re.sub(r"\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+", "[REDACTED]", text)
     text = re.sub(r"\b\d{5,20}:[A-Za-z0-9_-]{20,}", "[REDACTED]", text)
     text = re.sub(r"\b(?:gh[pousr]_[A-Za-z0-9_]+|github_pat_[A-Za-z0-9_]+)", "[REDACTED]", text)
+    text = re.sub(r"(?i)\bBearer\s+[^\s\"<>]+", "Bearer [REDACTED]", text)
+    text = re.sub(r"\bsk-[A-Za-z0-9_-]+", "[REDACTED]", text)
     return text
 
 
@@ -85,6 +87,11 @@ class ConversationService:
                     id TEXT PRIMARY KEY, actor TEXT, source TEXT, mode TEXT,
                     conversation TEXT, status TEXT, payload TEXT, result TEXT,
                     pid INTEGER, created REAL, changed REAL);
+                CREATE TABLE IF NOT EXISTS task_events (
+                    sequence INTEGER PRIMARY KEY AUTOINCREMENT, task_id TEXT,
+                    kind TEXT, text TEXT, created REAL);
+                CREATE TABLE IF NOT EXISTS replies (
+                    id TEXT PRIMARY KEY, task_id TEXT, text TEXT, created REAL);
                 CREATE TABLE IF NOT EXISTS channel_sessions (
                     scope TEXT PRIMARY KEY, link TEXT, mode TEXT, expires REAL);
             """)
@@ -133,7 +140,10 @@ class ConversationService:
             or not 1 <= len(text.strip()) <= 12000
         ):
             raise ConfigError("Enter a non-empty description of up to 12000 characters.")
-        repo, kind, number = target_link(link, mode)
+        if mode == "Chat History" and source == "desktop":
+            repo, kind, number = "", "chat", None
+        else:
+            repo, kind, number = target_link(link, mode)
         conversation = self.conversation(actor, source, mode)
         existing = self.request(request_id)
         if existing:
@@ -188,6 +198,15 @@ class ConversationService:
         return self.public(self.request(request_id))
 
     def public(self, row):
+        with self.db() as db:
+            events = [
+                dict(event)
+                for event in db.execute(
+                    "SELECT sequence,kind,text,created FROM task_events WHERE task_id=? "
+                    "ORDER BY sequence DESC LIMIT 100",
+                    (row["id"],),
+                )
+            ][::-1]
         return {
             "id": row["id"],
             "conversation_id": row["conversation"],
@@ -195,6 +214,7 @@ class ConversationService:
             "status": row["status"],
             "result": row["result"],
             "created_at": row["created"],
+            "events": events,
         }
 
     def tasks(self, actor, source="desktop"):
@@ -204,6 +224,76 @@ class ConversationService:
                 (actor, source),
             ).fetchall()
             return [self.public(row) for row in rows]
+
+    def event(self, task_id, kind, text):
+        if kind not in {"progress", "text", "interaction", "status"}:
+            return
+        text = self.clean(str(text))[:8000]
+        with self.db() as db:
+            previous = db.execute(
+                "SELECT text FROM task_events WHERE task_id=? ORDER BY sequence DESC LIMIT 1",
+                (task_id,),
+            ).fetchone()
+            if not previous or previous["text"] != text:
+                db.execute(
+                    "INSERT INTO task_events(task_id,kind,text,created) VALUES (?,?,?,?)",
+                    (task_id, kind, text, time.time()),
+                )
+                db.execute(
+                    "DELETE FROM task_events WHERE task_id=? AND kind!='interaction' "
+                    "AND sequence NOT IN (SELECT sequence FROM task_events WHERE task_id=? "
+                    "ORDER BY sequence DESC LIMIT 200)",
+                    (task_id, task_id),
+                )
+
+    async def answer(self, task_id, reply_id, actor, source, text):
+        row = self.request(task_id)
+        if (
+            not row
+            or row["actor"] != actor
+            or row["source"] != source
+            or not isinstance(reply_id, str)
+            or not re.fullmatch(r"[A-Za-z0-9:_-]{8,100}", reply_id)
+            or not isinstance(text, str)
+            or not 1 <= len(text.strip()) <= 12000
+        ):
+            raise ConfigError("Choose your waiting task and enter an answer.")
+        with self.db() as db:
+            previous = db.execute("SELECT task_id FROM replies WHERE id=?", (reply_id,)).fetchone()
+        if previous:
+            if previous["task_id"] != task_id:
+                raise ConfigError("Answer belongs to another task.")
+            return self.public(row)
+        if row["status"] != "needs_clarification":
+            raise ConfigError("This task is no longer waiting for an answer. Refresh tasks.")
+        cleaned = self.clean(text.strip())
+        now = time.time()
+        await self.archive.save(
+            {
+                "conversation_id": row["conversation"],
+                "message_id": reply_id + ":user",
+                "source": source,
+                "actor_id": actor,
+                "role": "user",
+                "content": cleaned,
+                "created_at": now,
+                "delivery_status": "saved",
+                "task_id": task_id,
+                "sequence": now,
+            }
+        )
+        with self.db() as db:
+            # A double click or concurrent reply cannot queue the same turn twice.
+            changed = db.execute(
+                "UPDATE requests SET status='queued',changed=? WHERE id=? "
+                "AND status='needs_clarification'",
+                (now, task_id),
+            ).rowcount
+            if not changed:
+                raise ConfigError("Another answer was accepted. Refresh this task.")
+            db.execute("INSERT INTO replies VALUES (?,?,?,?)", (reply_id, task_id, cleaned, now))
+        self.event(task_id, "status", "Answer accepted. Continuing this task with saved context.")
+        return self.public(self.request(task_id))
 
     def change(self, task_id, status, result=None):
         with self.db() as db:
@@ -223,7 +313,7 @@ class ConversationService:
     async def save_result(self, row):
         message = {
             "conversation_id": row["conversation"],
-            "message_id": row["id"] + ":assistant",
+            "message_id": row["id"] + ":assistant:" + str(row["changed"]),
             "source": row["source"],
             "actor_id": row["actor"],
             "role": "assistant",
@@ -235,7 +325,14 @@ class ConversationService:
         }
         await self.archive.save(message)
         outcome = json.loads(row["result"]).get("outcome", "failed")
-        self.change(row["id"], outcome if row["status"] == "save_pending" else row["status"])
+        if outcome == "needs_clarification":
+            self.event(row["id"], "interaction", json.loads(row["result"]).get("summary", ""))
+        self.change(
+            row["id"],
+            ("timed_out" if json.loads(row["result"]).get("error_code") == "timeout" else outcome)
+            if row["status"] == "save_pending"
+            else row["status"],
+        )
 
     async def retry_save(self, task_id, actor):
         row = self.request(task_id)
@@ -274,7 +371,7 @@ class ConversationService:
             else:
                 import base64
 
-                token = github_token(self.values)
+                token = github_token(self.values) if payload["kind"] != "chat" else ""
                 self.runtime_secrets.append(token)
                 basic = base64.b64encode(("x-access-token:" + token).encode()).decode()
                 adapter = CodexAdapter(
@@ -289,8 +386,12 @@ class ConversationService:
                 )
             prompt = json.dumps(
                 {
-                    "instruction": "Complete this GitHub task using host tools and Full Access. "
-                    "Read the GitHub issue/PR and comments first, including linked requirements. "
+                    "instruction": (
+                        "Answer this private conversation. Do not publish it to GitHub. "
+                        if payload["kind"] == "chat"
+                        else "Complete this GitHub task using host tools and Full Access. "
+                    )
+                    + "Read the GitHub issue/PR and comments first, including linked requirements. "
                     "Use host git authentication and the GH_TOKEN environment variable "
                     "for GitHub REST. "
                     "Do not assume gh is installed. Never print the token. Clone or "
@@ -308,17 +409,44 @@ class ConversationService:
                     "requirements are unclear. Never expose credentials in output or files.",
                     "task": payload,
                     "conversation_history": history,
+                    "continuation": self.continuation(row),
+                    "privacy": (
+                        "Private chat: answer the user only. Do not create, publish or "
+                        "update GitHub issues, PRs or comments. Do not run GitHub tasks."
+                        if payload["kind"] == "chat"
+                        else "GitHub workspace task."
+                    ),
                     "parent_rules": parent_rules(path),
                     "current_unix_time": int(time.time()),
                 },
                 ensure_ascii=False,
             )
+            if payload["kind"] == "chat":
+                private_prompt = json.loads(prompt)
+                private_prompt["instruction"] = (
+                    "Answer this private conversation using the saved history. "
+                    "Do not execute GitHub tasks, edit repositories, create or publish issues, "
+                    "PRs or comments. Return summary and outcome using the supplied schema. "
+                    "If you need information, return needs_clarification and ask in summary."
+                )
+                prompt = json.dumps(private_prompt, ensure_ascii=False)
+            if isinstance(adapter, CodexAdapter):
+
+                async def on_event(event):
+                    self.event(tid, event["type"], event.get("text", ""))
+
+                adapter.on_event = on_event
+            self.event(tid, "status", "Codex started.")
             result = await adapter.invoke(
                 path, prompt, RESULT_SCHEMA, int(self.values.get("PRBOT_TASK_TIMEOUT", 3600))
             )
-            if not self.adapter and (
-                result.get("outcome") == "completed"
-                or (result.get("pr_url") and result.get("outcome") != "needs_clarification")
+            if (
+                not self.adapter
+                and payload["kind"] != "chat"
+                and (
+                    result.get("outcome") == "completed"
+                    or (result.get("pr_url") and result.get("outcome") != "needs_clarification")
+                )
             ):
                 await self.verify_delivery(payload, result, token)
             text = self.clean(json.dumps(result, ensure_ascii=False))
@@ -333,6 +461,8 @@ class ConversationService:
             )
             raise
         except Exception as error:
+            if isinstance(error, TimeoutError):
+                error = SDKFailure("timeout", "turn", "TimeoutError")
             if self.request(tid)["status"] == "save_pending":
                 return  # Retry archival only; SDK has already finished.
             message = (
@@ -365,6 +495,31 @@ class ConversationService:
                     await self.save_result(self.request(tid))
                 except ConfigError:
                     pass
+
+    def continuation(self, row):
+        with self.db() as db:
+            answers = [
+                dict(answer)
+                for answer in db.execute(
+                    "SELECT text,created FROM replies WHERE task_id=? ORDER BY created,id",
+                    (row["id"],),
+                )
+            ]
+            questions = [
+                dict(question)
+                for question in db.execute(
+                    "SELECT text,created FROM task_events WHERE task_id=? AND kind='interaction' "
+                    "ORDER BY sequence",
+                    (row["id"],),
+                )
+            ]
+        return {
+            "task_id": row["id"],
+            "questions": questions,
+            "answers": answers,
+            "instruction": "Continue this original task using these answers. Inspect existing "
+            "repository work before editing; do not repeat completed delivery operations.",
+        }
 
     async def verify_delivery(self, payload, result, token):
         from prbot.github import CheckFailure, DeliveryError, GitHub

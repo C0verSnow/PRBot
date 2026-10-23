@@ -24,13 +24,34 @@ def private_home(request):
 _stage = "dependencies"
 
 
+def emit(event):
+    sys.stdout.write(json.dumps(event, ensure_ascii=True) + "\n")
+    sys.stdout.flush()
+
+
+def safe_text(text, request):
+    from prbot.conversation_service import redact
+
+    auth = json.loads(request["auth"])
+    secrets = [
+        value
+        for key, value in os.environ.items()
+        if any(word in key.upper() for word in ("TOKEN", "SECRET", "PASSWORD", "KEY"))
+    ]
+    secrets += list(auth.get("tokens", {}).values())
+    for secret in secrets:
+        if isinstance(secret, str) and secret:
+            text = text.replace(secret, "[REDACTED]")
+    return redact(text, secrets)[:8000]
+
+
 def _run():
     global _stage
     from codex_cli_bin import bundled_codex_path
     from openai_codex import ApprovalMode, Codex, CodexConfig, Sandbox
 
     _stage = "request"
-    request = json.load(sys.stdin)
+    request = json.loads(sys.stdin.readline())
     workspace = Path(request["path"]).resolve()
     _stage = "runtime"
     runtime = str(bundled_codex_path().resolve())
@@ -94,21 +115,41 @@ def _run():
             if codex.account().account is None:
                 raise RuntimeError("Codex login required")
             _stage = "turn"
+            private_chat = json.loads(request["prompt"]).get("task", {}).get("kind") == "chat"
             thread = codex.thread_start(
                 cwd=str(workspace),
                 ephemeral=True,
-                sandbox=Sandbox.full_access,
+                sandbox=Sandbox.read_only if private_chat else Sandbox.full_access,
                 approval_mode=ApprovalMode.deny_all,
                 developer_instructions="Follow applicable AGENTS.md. Use host tools as needed. "
-                "Never run local builds or compilation tests. Return the supplied JSON schema.",
+                "Never run local builds or compilation tests. Return the supplied JSON schema. "
+                "If information or user confirmation is needed, stop safely and return "
+                "outcome=needs_clarification with a clear question in summary. "
+                "Do not use request_user_input. Never publish private chat to GitHub.",
             )
-            result = thread.run(request["prompt"], output_schema=request["schema"])
-            if str(result.status.value) != "completed" or not result.final_response:
+            turn = thread.turn(request["prompt"], output_schema=request["schema"])
+            final_response = None
+            completed = False
+            for event in turn.stream():
+                # Do not forward raw RPC payloads, commands, reasoning or tool output.
+                if event.method == "item/started":
+                    emit({"type": "progress", "text": "Codex is working on the task."})
+                elif event.method == "item/completed":
+                    item = event.payload.item
+                    item = item.root if hasattr(item, "root") else item
+                    if getattr(item, "type", None) == "agentMessage":
+                        phase = getattr(item, "phase", None)
+                        phase = getattr(phase, "value", phase)
+                        if phase in {None, "final_answer"}:
+                            final_response = item.text
+                        elif phase == "commentary":
+                            emit({"type": "text", "text": safe_text(item.text, request)})
+                elif event.method == "turn/completed":
+                    completed = event.payload.turn.status.value == "completed"
+            if not completed or not final_response:
                 raise RuntimeError("Codex turn did not complete")
-            json.loads(result.final_response)
-            sys.stdout.write(
-                json.dumps({"result": json.loads(result.final_response), "auth": auth.read_text()})
-            )
+            result = json.loads(final_response)
+            emit({"type": "result", "result": result, "auth": auth.read_text()})
 
 
 def run():

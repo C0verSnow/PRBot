@@ -43,3 +43,9 @@
 @keyframes breathe { 50% { transform: scale(1.12); box-shadow: 0 0 0 14px #cc785c0c; } }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
 input:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 3px; }
+
+.close-settings { display: grid; place-items: center; width: 32px; height: 32px; border-radius: 50%; font-size: 24px; }
+.close-settings:hover { background: #eae8e2; }
+.close-settings:active { background: #dedbd3; }
+.close-settings:focus-visible { outline: 2px solid #55544f; outline-offset: 2px; }
+.execution-feed { overflow-y: auto; max-height: 360px; overflow-anchor: none; }
