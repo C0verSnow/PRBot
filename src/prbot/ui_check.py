@@ -488,19 +488,22 @@ true;
       pr_url:'',validation:'Waiting for your answer'}),
     events:Array.from({length:35},(_,index) => ({sequence:index,kind:'text',created:index+1,
       text:'Reviewed repository context · step ' + index}))};
-  window.receiveNative({ok:true,tasks:[JSON.parse(JSON.stringify(fixtureTask))],tasks_revision:999999999}); await tick();
+  window.receiveNative({ok:true,tasks:[JSON.parse(JSON.stringify(fixtureTask))],
+    tasks_revision:999999999}); await tick();
   const feed = document.querySelector('.execution-feed');
   feed.scrollTop = 0; feed.dispatchEvent(new Event('scroll')); await tick();
   field('draft').focus();
   const draftValue = field('draft').value;
   fixtureTask.events.push({sequence:36,kind:'text',created:36,text:'Ready for your answer.'});
-  window.receiveNative({ok:true,tasks:[JSON.parse(JSON.stringify(fixtureTask))],tasks_revision:999999999}); await tick();
+  window.receiveNative({ok:true,tasks:[JSON.parse(JSON.stringify(fixtureTask))],
+    tasks_revision:999999999}); await tick();
   assert(feed.scrollTop === 0, 'New feedback interrupted historical reading');
   assert(document.activeElement === field('draft') && field('draft').value === draftValue,
     'Feedback changed composer focus or text');
   feed.scrollTop = feed.scrollHeight; feed.dispatchEvent(new Event('scroll')); await tick();
   fixtureTask.events.push({sequence:37,kind:'text',created:37,text:'Task safely paused.'});
-  window.receiveNative({ok:true,tasks:[JSON.parse(JSON.stringify(fixtureTask))],tasks_revision:999999999}); await tick();
+  window.receiveNative({ok:true,tasks:[JSON.parse(JSON.stringify(fixtureTask))],
+    tasks_revision:999999999}); await tick();
   assert(feed.scrollHeight - feed.scrollTop - feed.clientHeight < 2,
     'Feedback did not follow near the bottom');
   edit(field('answer-ui-waiting-task'), 'Use feature/ui'); await tick();
