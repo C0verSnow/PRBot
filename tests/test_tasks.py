@@ -278,8 +278,9 @@ async def test_accepted_task_keeps_selected_workspace_when_preference_changes(ap
     select_work_root(str(second))
     await app.execute(app.request("request-123"))
     path = app.adapter.invoke.call_args.args[0]
-    assert path.parent == first / "PRBot-workspaces"
-    assert not list((second / "PRBot-workspaces").glob("task-*"))
+    assert path == first
+    assert not (second / "PRBot-workspaces").exists()
+    assert not list(first.glob("task-*"))
 
 
 async def test_telegram_runner_cannot_claim_desktop_id_token_override(app):
@@ -310,7 +311,7 @@ async def test_archive_retry_selects_the_accepted_configuration(app, tmp_path, m
     app.adapter = None
     app.change("request-123", "save_pending", json.dumps({"outcome": "completed"}))
     await app.retry_save("request-123", "local:me")
-    assert selected.call_args.kwargs["configuration"] == str(first / "PRBot-workspaces/.env")
+    assert selected.call_args.kwargs["configuration"] == str(first / ".env")
     archive.save.assert_awaited_once()
 
 
@@ -326,3 +327,50 @@ async def test_missing_old_configuration_never_archives_to_the_new_project(app, 
     assert app.request("request-123")["status"] == "save_pending"
     assert "Original Infisical" in app.request("request-123")["result"]
     assert app.archive.save.await_count == 1
+
+
+@pytest.mark.parametrize("text", ["做", "fix", "完成issue即可", "1234567"])
+async def test_short_nonempty_descriptions_are_accepted(app, text):
+    task = await app.submit(
+        "short-request", "local:me", "desktop", "Issue", "https://github.com/o/r", text
+    )
+    assert task["status"] == "queued"
+    assert json.loads(app.request(task["id"])["payload"])["text"] == text
+
+
+@pytest.mark.parametrize("text", ["", " \n\t", "x" * 12001])
+async def test_empty_or_oversized_descriptions_are_rejected(app, text):
+    with pytest.raises(ConfigError):
+        await app.submit(
+            "empty-request", "local:me", "desktop", "Issue", "https://github.com/o/r", text
+        )
+    app.archive.save.assert_not_awaited()
+
+
+@pytest.mark.parametrize("checks,expected", [(False, "pending"), (True, "passed"),
+                                             ("failure", "failed"), ("network", "unknown")])
+async def test_delivery_preserves_pr_and_closed_issue_when_checks_not_passed(
+    app, monkeypatch, checks, expected
+):
+    from prbot.github import DeliveryError
+
+    github = Mock(request=AsyncMock(side_effect=[
+        {"state": "open", "head": {"sha": "head"}},
+        {"state": "closed"},
+        {"state": "open", "head": {"sha": "head"}},
+    ]), checks=AsyncMock(return_value=checks), close=AsyncMock())
+    if checks == "failure":
+        github.checks.side_effect = DeliveryError("Required remote checks failed. Open the PR Checks tab.")
+    if checks == "network":
+        github.checks.side_effect = DeliveryError("GitHub request unconfirmed.")
+    monkeypatch.setattr("prbot.github.GitHub", lambda token: github)
+    result = {"summary": "Implemented", "outcome": "completed",
+              "pr_url": "https://github.com/o/r/pull/1", "validation": "SDK reports success"}
+    await app.verify_delivery({"repo": "o/r", "kind": "issues", "number": 9}, result, "token")
+    assert result["delivery"]["pr"] == "open"
+    assert result["delivery"]["issue"] == "closed"
+    assert result["delivery"]["ci"] == expected
+    assert result["outcome"] == ("completed" if checks is True else "delivered_unverified")
+    assert result["pr_url"] == "https://github.com/o/r/pull/1"
+    assert result["delivery"]["code"] == "completed_by_codex"
+    github.close.assert_awaited_once()

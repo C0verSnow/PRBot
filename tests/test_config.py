@@ -83,14 +83,14 @@ def test_selected_path_prepares_only_bootstrap_and_preserves_existing_env(tmp_pa
     folder = tmp_path / "chosen"
     folder.mkdir()
     select_work_root(str(folder))
-    assert workspace_directory() == folder / "PRBot-workspaces"
+    assert workspace_directory() == folder
     path = workspace_directory() / ".env"
     path.write_text("INFISICAL_CLIENT_ID=existing\n")
     prepare_env_directory()
     assert path.read_text() == "INFISICAL_CLIENT_ID=existing\n"
     with pytest.raises(ConfigError):
         select_work_root(str(folder / "missing"))
-    assert workspace_directory() == folder / "PRBot-workspaces"
+    assert workspace_directory() == folder
 
 
 def test_env_directory_rejects_symlinks(tmp_path):
