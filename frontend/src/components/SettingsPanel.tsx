@@ -1,6 +1,14 @@
 import { useEffect, useRef, useState } from 'react';
 import type { InfisicalFields, NativeResult, SendAction } from '../types';
 const sections = ['Workspace', 'Connections', 'Configuration', 'Background Service'] as const;
+const configurationFields = [
+  { key: 'INFISICAL_URL', label: 'Infisical URL', example: 'https://app.infisical.com', help: 'Infisical service address. For self-hosted deployments, enter your actual service URL.', defaultValue: 'https://app.infisical.com' },
+  { key: 'INFISICAL_CLIENT_ID', label: 'Client ID', example: 'your-client-id', help: 'Enter your assigned Client ID. The example is a placeholder.' },
+  { key: 'INFISICAL_CLIENT_SECRET', label: 'Client Secret', example: 'your-client-secret', help: 'Enter the real Secret paired with your Client ID. The example is a placeholder; input stays hidden.' },
+  { key: 'INFISICAL_PROJECT_ID', label: 'Project ID', example: 'your-project-id', help: 'Enter the actual target Project ID. The example is a placeholder.' },
+  { key: 'INFISICAL_ENVIRONMENT', label: 'Environment', example: 'dev', help: 'Enter an environment slug that exists in your target project.', defaultValue: 'dev' },
+  { key: 'INFISICAL_SECRET_PATH', label: 'Secret Path', example: '/ or /prbot', help: 'Enter the target secret path, starting with /.', defaultValue: '/' },
+] satisfies { key: keyof InfisicalFields; label: string; example: string; help: string; defaultValue?: string }[];
 const labels: Record<string, string> = { running: 'Running', starting: 'Starting', stopping: 'Stopping', stopped: 'Stopped', reconnecting: 'Reconnecting', stale: 'Stale', unknown: 'Unknown', unavailable: 'Unavailable', halted: 'Error', crashed: 'Error' };
 export function serviceLabel(status: NativeResult['status']) { return labels[status?.state || 'unknown'] || 'Unknown'; }
 interface Props { open: boolean; onClose: () => void; busy: boolean; result: NativeResult; send: SendAction }
@@ -73,17 +81,14 @@ export function SettingsPanel({ open, onClose, busy, result, send }: Props) {
         {section === 'Configuration' && <section><h3 className="mb-5 text-lg font-medium">Configuration</h3>
           <p className="mb-4 text-xs leading-6 text-muted">Infisical connection settings for this workspace. Save explicitly, then restart PRBot to apply changes to all services. New desktop requests can pick up saved changes immediately; running tasks keep their current settings.</p>
           {configuration ? <form className="space-y-4" onSubmit={e => { e.preventDefault(); savingConfiguration.current = true; send('save_configuration', { configuration, configuration_path: result.configuration?.path }); }}>
-            {([
-              ['INFISICAL_URL', 'Infisical URL'], ['INFISICAL_CLIENT_ID', 'Client ID'],
-              ['INFISICAL_CLIENT_SECRET', 'Client Secret'], ['INFISICAL_PROJECT_ID', 'Project ID'],
-              ['INFISICAL_ENVIRONMENT', 'Environment'], ['INFISICAL_SECRET_PATH', 'Secret Path'],
-            ] as const).map(([key, label]) => <div key={key}><label htmlFor={key} className="mb-1 block text-sm font-medium">{label}</label><input
+            {configurationFields.map(({ key, label, example, help, defaultValue }) => <div key={key}><label htmlFor={key} className="mb-1 block text-sm font-medium">{label}<code className="mt-1 block break-all text-xs text-muted">{key}</code></label><input
               id={key} name={key} type={key === 'INFISICAL_CLIENT_SECRET' ? 'password' : key === 'INFISICAL_URL' ? 'url' : 'text'}
               required={key !== 'INFISICAL_CLIENT_SECRET' || !result.configuration?.client_secret_set} disabled={busy}
-              autoComplete="off" spellCheck={false} value={configuration[key]} maxLength={20000}
-              placeholder={key === 'INFISICAL_CLIENT_SECRET' && result.configuration?.client_secret_set ? 'Configured — leave blank to keep' : undefined}
+              autoComplete="off" spellCheck={false} value={configuration[key]} maxLength={20000} aria-describedby={`${key}-help`}
+              placeholder={key === 'INFISICAL_CLIENT_SECRET' && result.configuration?.client_secret_set ? 'Configured — leave blank to keep' : example}
               onChange={e => { setConfiguration(previous => previous && ({ ...previous, [key]: e.target.value })); setConfigurationDirty(true); }}
               className="w-full rounded-lg border border-line bg-white px-3 py-2 text-sm" />
+              <p id={`${key}-help`} className="mt-1 text-xs leading-6 text-muted"><span>Example: <code>{example}</code>. </span>{help}{defaultValue && <span> Default: <code>{defaultValue}</code>.</span>}</p>
               {key === 'INFISICAL_CLIENT_SECRET' && <p className="mt-1 text-xs text-muted">{result.configuration?.client_secret_set ? 'Client Secret is configured. Leave blank to keep the saved value.' : 'Client Secret is not configured.'}</p>}
             </div>)}
             {!!result.configuration?.environment_overrides.length && <p className="text-xs leading-6 text-muted">Process environment variables override saved values: {result.configuration.environment_overrides.join(', ')}.</p>}

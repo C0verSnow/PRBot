@@ -142,6 +142,41 @@ def test_configuration_roundtrip_private_and_secret_never_exposed(tmp_path):
     assert bootstrap_form()["client_secret_set"]
 
 
+def test_all_configuration_fields_save_and_reload_without_mixing_values(tmp_path):
+    path = tmp_path / ".env"
+    values = fields() | {
+        "INFISICAL_URL": "https://infisical.example.test",
+        "INFISICAL_ENVIRONMENT": "staging",
+        "INFISICAL_SECRET_PATH": "/prbot",
+    }
+    settings_request(
+        "save_configuration", {"configuration": values, "configuration_path": str(path)}
+    )
+    assert read_env() == values
+    _, reply = settings_request("configuration", {})
+    assert reply["configuration"]["values"] == {
+        key: value for key, value in values.items() if key != "INFISICAL_CLIENT_SECRET"
+    }
+    assert reply["configuration"]["client_secret_set"]
+    assert values["INFISICAL_CLIENT_SECRET"] not in json.dumps(reply)
+    updated = values | {
+        "INFISICAL_CLIENT_ID": "updated-client",
+        "INFISICAL_CLIENT_SECRET": "",
+        "INFISICAL_PROJECT_ID": "updated-project",
+        "INFISICAL_ENVIRONMENT": "production",
+        "INFISICAL_SECRET_PATH": "/updated",
+    }
+    settings_request(
+        "save_configuration", {"configuration": updated, "configuration_path": str(path)}
+    )
+    assert read_env() == updated | {"INFISICAL_CLIENT_SECRET": values["INFISICAL_CLIENT_SECRET"]}
+    _, reloaded = settings_request("configuration", {})
+    assert reloaded["configuration"]["values"] == {
+        key: value for key, value in updated.items() if key != "INFISICAL_CLIENT_SECRET"
+    }
+    assert reloaded["configuration"]["client_secret_set"]
+
+
 def test_configuration_preserves_process_priority(tmp_path, monkeypatch):
     monkeypatch.setenv("INFISICAL_PROJECT_ID", "environment-project")
     monkeypatch.setenv("INFISICAL_CLIENT_SECRET", "environment-secret")

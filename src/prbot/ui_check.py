@@ -78,6 +78,29 @@ def schedule_check(web, output):
   }
   const close = document.getElementById('close-settings').getBoundingClientRect();
   assert(close.top >= 0 && close.right < innerWidth, 'Close settings button clipped');
+  const configuration = document.querySelector('[data-section="Configuration"]');
+  for (let count = 0; configuration.disabled && count < 300; count++) {
+    await new Promise(resolve => setTimeout(resolve, 10));
+  }
+  configuration.click();
+  for (let count = 0; count < 300; count++) {
+    if (document.getElementById('INFISICAL_URL')
+      && !document.getElementById('INFISICAL_URL').disabled) break;
+    await new Promise(resolve => setTimeout(resolve, 10));
+  }
+  const content = document.querySelector('.settings-content');
+  assert(content.scrollHeight > content.clientHeight, 'Configuration should scroll');
+  for (const input of document.querySelectorAll('input[name^="INFISICAL_"]')) {
+    input.scrollIntoView({block:'center'});
+    const rect = input.getBoundingClientRect();
+    const area = content.getBoundingClientRect();
+    assert(rect.left >= area.left && rect.right <= area.right, 'Configuration field clipped');
+    assert(rect.top >= area.top && rect.bottom <= area.bottom, 'Configuration cannot scroll');
+  }
+  document.getElementById('save-configuration').scrollIntoView({block:'center'});
+  assert(document.getElementById('save-configuration').getBoundingClientRect().bottom
+    <= content.getBoundingClientRect().bottom, 'Save configuration cannot scroll');
+  content.scrollTop = 0;
   window.__uiCheckResult = 'ok';
 })().catch(error => { window.__uiCheckResult = 'failed:' + error.message; });
 true;
@@ -244,31 +267,99 @@ true;
   await waitFor(() => !fetchToken.disabled && useToken().disabled);
   await select('Configuration');
   await waitFor(() => field('INFISICAL_URL') && !field('INFISICAL_URL').disabled);
-  assert(field('INFISICAL_CLIENT_SECRET').type === 'password', 'Secret is visible');
+  const examples = {INFISICAL_URL:'https://app.infisical.com',
+    INFISICAL_CLIENT_ID:'your-client-id', INFISICAL_CLIENT_SECRET:'your-client-secret',
+    INFISICAL_PROJECT_ID:'your-project-id', INFISICAL_ENVIRONMENT:'dev',
+    INFISICAL_SECRET_PATH:'/ or /prbot'};
+  const checkFieldHelp = () => {
+    for (const [key,example] of Object.entries(examples)) {
+      const element = field(key);
+      const label = document.querySelector('label[for="' + key + '"]');
+      assert(label.textContent.includes(key), 'Missing key label: ' + key);
+      assert(label.textContent.trim() !== key, 'Missing friendly name: ' + key);
+      assert(element.name === key && !element.disabled, 'Field mapping/editability: ' + key);
+      const help = field(element.getAttribute('aria-describedby'));
+      assert(help && help.textContent.includes('Example: ' + example), 'Missing example: ' + key);
+      assert(getComputedStyle(help).display !== 'none' && help.getClientRects().length,
+        'Hidden help: ' + key);
+    }
+    assert(field('INFISICAL_CLIENT_SECRET').type === 'password', 'Secret is visible');
+  };
+  const assertValues = (values, saved = false) => {
+    for (const [key,value] of Object.entries(values)) {
+      assert(field(key).value === (saved && key === 'INFISICAL_CLIENT_SECRET' ? '' : value),
+        'Configuration value mismatch: ' + key);
+    }
+  };
+  const editValues = async values => {
+    for (const [key,value] of Object.entries(values)) { edit(field(key), value); await tick(); }
+  };
+  checkFieldHelp();
+  assert(field('INFISICAL_CLIENT_ID').value === '', 'Client ID example became input');
+  assert(field('INFISICAL_PROJECT_ID').value === '', 'Project ID example became input');
+  assert(field('INFISICAL_CLIENT_SECRET').value === '', 'Secret example became input');
   const values = {INFISICAL_URL:'http://127.0.0.1:1', INFISICAL_CLIENT_ID:'ui-client',
     INFISICAL_CLIENT_SECRET:'ui-secret-only', INFISICAL_PROJECT_ID:'ui-project',
-    INFISICAL_ENVIRONMENT:'dev', INFISICAL_SECRET_PATH:'/'};
-  for (const [key,value] of Object.entries(values)) {
-    edit(field(key), value); await tick();
-  }
+    INFISICAL_ENVIRONMENT:'staging', INFISICAL_SECRET_PATH:'/prbot'};
+  await editValues(values);
+  checkFieldHelp(); assertValues(values);
   await select('Workspace'); await select('Configuration');
-  assert(field('INFISICAL_CLIENT_SECRET').value === 'ui-secret-only',
-    'Navigation lost unsaved configuration');
-  window.receiveNative({ok:false, message:'Cannot save configuration. Check write permissions.'});
-  await tick();
-  assert(field('INFISICAL_CLIENT_SECRET').value === 'ui-secret-only', 'Save failure lost draft');
+  assertValues(values);
+  // Background status and task refreshes must not replace unsaved edits.
+  window.receiveNative({ok:true, status:{state:'stopped',loaded:false}, tasks:[]});
+  await tick(); assertValues(values);
+  const restorePost = handler.postMessage;
+  handler.postMessage = body => {
+    if (body.action === 'save_configuration') {
+      window.__configurationRequest = body;
+    } else restorePost.call(handler, body);
+  };
+  try {
+    field('save-configuration').click(); await tick();
+    assertValues(window.__configurationRequest.configuration);
+    for (const [key,value] of Object.entries(values)) {
+      assert(window.__configurationRequest.configuration[key] === value,
+        'Submitted field mismatch: ' + key);
+    }
+    window.receiveNative({ok:false, busy:false, completed_action:'save_configuration',
+      message:'Cannot save configuration. Check write permissions.'});
+    await tick(); assertValues(values);
+    assert(field('settings-feedback').textContent.includes('write permissions'),
+      'Missing save failure reason');
+  } finally { handler.postMessage = restorePost; }
+  edit(field('INFISICAL_SECRET_PATH'), 'relative'); await tick();
+  field('save-configuration').click(); await tick();
+  await waitFor(() => !field('INFISICAL_URL').disabled
+    && field('settings-feedback').textContent.includes('must start with /'));
+  assertValues({...values, INFISICAL_SECRET_PATH:'relative'});
+  edit(field('INFISICAL_SECRET_PATH'), values.INFISICAL_SECRET_PATH); await tick();
   field('save-configuration').click(); await tick();
   await waitFor(() => !field('INFISICAL_URL').disabled
     && field('save-configuration').disabled
     && field('INFISICAL_CLIENT_SECRET').value === '');
-  assert(field('save-configuration').disabled, 'Configuration not saved');
-  assert(field('INFISICAL_CLIENT_SECRET').value === '', 'Secret echoed after save');
+  assertValues(values, true); checkFieldHelp();
+  assert(field('settings-feedback').textContent.includes('Restart PRBot'), 'Missing apply scope');
   assert(field('INFISICAL_CLIENT_SECRET').placeholder.includes('Configured'),
     'Missing secret state');
+  assert(field('INFISICAL_CLIENT_SECRET').parentElement.textContent.includes('Leave blank'),
+    'Missing secret retention help');
+  const updated = {...values, INFISICAL_URL:'http://127.0.0.1:2',
+    INFISICAL_CLIENT_ID:'ui-client-updated', INFISICAL_CLIENT_SECRET:'',
+    INFISICAL_PROJECT_ID:'ui-project-updated', INFISICAL_ENVIRONMENT:'production',
+    INFISICAL_SECRET_PATH:'/updated'};
+  await editValues(updated);
+  field('save-configuration').click(); await tick();
+  await waitFor(() => !field('INFISICAL_URL').disabled && field('save-configuration').disabled);
   await select('Workspace'); await select('Configuration');
   await waitFor(() => !field('INFISICAL_URL').disabled);
-  assert(field('INFISICAL_PROJECT_ID').value === 'ui-project', 'Saved project not restored');
-  assert(field('INFISICAL_CLIENT_SECRET').value === '', 'Saved secret exposed');
+  assertValues(updated, true); checkFieldHelp();
+  const reload = Array.from(document.querySelectorAll('button'))
+    .find(button => button.textContent === 'Reload configuration');
+  reload.click(); await tick();
+  await waitFor(() => !field('INFISICAL_URL').disabled);
+  assertValues(updated, true); checkFieldHelp();
+  assert(field('INFISICAL_CLIENT_SECRET').placeholder.includes('Configured'),
+    'Blank save lost configured Secret');
   await select('Background Service');
   await tick();
   assert(document.querySelectorAll('#service-power').length === 1);
