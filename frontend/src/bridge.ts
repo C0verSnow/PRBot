@@ -1,43 +1,52 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { NativeResult, SendAction } from './types';
-
+import type { Action, NativeResult, SendAction } from './types';
 export function useNativeBridge() {
   const [result, setResult] = useState<NativeResult>({ ok: true });
   const [busy, setBusy] = useState(false);
   const pending = useRef(false);
-  const send = useCallback<SendAction>((action, text) => {
+  const activeAction = useRef<Action | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+  const send = useCallback<SendAction>((action, data = {}) => {
     if (pending.current && action !== 'ready') return;
     const handler = window.webkit?.messageHandlers.prbot;
     if (!handler) {
-      setResult(previous => ({ ...previous, ok: false, message: '请在 PRBot macOS 应用中使用此功能。' }));
+      setResult(previous => ({ ...previous, ok: false, message: 'Open PRBot for macOS to use this feature.' }));
       return;
     }
     if (action !== 'ready') {
       pending.current = true;
+      activeAction.current = action;
       setBusy(true);
-      setResult(previous => ({ ...previous, ok: true, message: '正在处理，请完成系统对话框中的操作…' }));
+      setSubmitting(action === 'submit_message');
     }
-    handler.postMessage({ action, text });
+    try { handler.postMessage({ action, ...data }); }
+    catch {
+      pending.current = false; activeAction.current = null;
+      setBusy(false); setSubmitting(false);
+      setResult(previous => ({ ...previous, ok: false, message: 'Request could not be sent. Retry.' }));
+    }
   }, []);
-
   useEffect(() => {
+    let lastReport = Date.now();
     const receive = (payload: NativeResult) => {
-      pending.current = !!payload.busy;
-      setBusy(!!payload.busy);
-      setResult(previous => ({
-        ...previous, ...payload,
-        // Background status refreshes must preserve task handoff instructions/errors.
+      if (payload.status) lastReport = Date.now();
+      if (payload.completed_action === activeAction.current) activeAction.current = null;
+      pending.current = activeAction.current !== null || !!payload.busy;
+      setBusy(pending.current);
+      setSubmitting(activeAction.current === 'submit_message');
+      setResult(previous => ({ ...previous, ...payload,
         message: payload.message ?? previous.message,
         ok: payload.message ? payload.ok : previous.ok,
       }));
     };
     window.receiveNative = receive;
     send('ready');
-    const timer = window.setInterval(() => { if (!pending.current) send('ready'); }, 15000);
-    return () => {
-      window.clearInterval(timer);
-      if (window.receiveNative === receive) delete window.receiveNative;
-    };
+    const timer = window.setInterval(() => {
+      if (Date.now() - lastReport > 15000) setResult(previous => ({ ...previous,
+        status: { ...previous.status, state: 'stale' } }));
+      if (!pending.current) send('ready');
+    }, 3000);
+    return () => { window.clearInterval(timer); if (window.receiveNative === receive) delete window.receiveNative; };
   }, [send]);
-  return { result, busy, send };
+  return { result, busy, submitting, send };
 }

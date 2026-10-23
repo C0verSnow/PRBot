@@ -13,7 +13,7 @@ def instance_lock():
         try:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
-            raise RuntimeError("已有 PRBot 实例运行，请先停止服务。") from None
+            raise RuntimeError("PRBot is already running. Stop the service first.") from None
         yield
 
 

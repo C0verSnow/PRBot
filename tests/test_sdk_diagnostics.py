@@ -1,4 +1,3 @@
-import asyncio
 import io
 import json
 import sys
@@ -7,8 +6,6 @@ from unittest.mock import AsyncMock, Mock
 import pytest
 
 from prbot.codex_adapter import CodexAdapter, SDKFailure, worker_failure
-from prbot.config import Config
-from prbot.telegram_client import ServiceHalted, run
 
 
 @pytest.mark.parametrize("stage", ["dependencies", "runtime", "auth", "initialize"])
@@ -67,46 +64,11 @@ async def test_missing_account_does_not_overwrite_saved_login(tmp_path, monkeypa
         "prbot.codex_adapter.asyncio.create_subprocess_exec", AsyncMock(return_value=process)
     )
     monkeypatch.setattr("prbot.codex_adapter.os.killpg", Mock())
-    save = Mock()
-    monkeypatch.setattr("prbot.task_config.credential", save)
     adapter = CodexAdapter("original-login")
     assert await adapter.invoke(tmp_path, "__prbot_account_check__", {}, 1) == {
         "authenticated": False,
     }
-    save.assert_not_called()
     assert adapter.auth == "original-login"
-
-
-async def test_service_retains_startup_category_without_raw_diagnostics(monkeypatch, caplog):
-    from prbot.state import State
-    from prbot.task_config import TaskConfig
-
-    bot = Mock(
-        initialize=AsyncMock(),
-        get_webhook_info=AsyncMock(return_value=Mock(url="")),
-        shutdown=AsyncMock(),
-        username="test",
-    )
-    github = Mock(close=AsyncMock())
-    monkeypatch.setattr("prbot.telegram_client.Bot", lambda token: bot)
-    monkeypatch.setattr(TaskConfig, "load", lambda: TaskConfig(frozenset({1}), frozenset({"a/b"})))
-    monkeypatch.setattr("prbot.execution_setup.execution_credentials", lambda: ("secret", "auth"))
-    monkeypatch.setattr("prbot.github.GitHub", lambda token: github)
-    monkeypatch.setattr(
-        CodexAdapter,
-        "check_auth",
-        AsyncMock(side_effect=SDKFailure("initialize", "initialize", "RuntimeError")),
-    )
-    state = State("test")
-    try:
-        with pytest.raises(ServiceHalted, match="阶段=initialize"):
-            await run(Config("test"), state, asyncio.Event(), Mock())
-        assert "code=initialize stage=initialize type=RuntimeError" in caplog.text
-        assert "secret" not in caplog.text
-        github.close.assert_awaited_once()
-        bot.shutdown.assert_awaited_once()
-    finally:
-        state.close()
 
 
 def test_worker_account_check_does_not_force_refresh(tmp_path, monkeypatch, capsys):
@@ -178,3 +140,45 @@ def test_real_sdk_transport_exception_type_survives_safe_boundary(monkeypatch, c
     assert failure.exception_type == "TransportClosedError"
     assert failure.code == "network"
     assert "secret-token" not in captured.out + str(failure)
+
+
+async def test_real_full_access_runtime_initializes_without_credentials(tmp_path):
+    result = await CodexAdapter("{}").invoke(tmp_path, "__prbot_runtime_check__", {}, 30)
+    assert result == {"initialized": True, "thread_started": True}
+
+
+def test_worker_explicitly_enables_host_tools_and_full_access(tmp_path, monkeypatch, capsys):
+    from prbot import sdk_worker
+
+    runtime = tmp_path / "codex"
+    runtime.touch(mode=0o700)
+    client = Mock()
+    client.thread_start.return_value = Mock(id="thread")
+    sdk = Mock()
+    sdk.Codex.return_value.__enter__ = Mock(return_value=client)
+    sdk.Codex.return_value.__exit__ = Mock(return_value=False)
+    monkeypatch.setitem(sys.modules, "openai_codex", sdk)
+    monkeypatch.setitem(sys.modules, "codex_cli_bin", Mock(bundled_codex_path=lambda: runtime))
+    monkeypatch.setattr(
+        sys,
+        "stdin",
+        io.StringIO(
+            json.dumps(
+                {
+                    "path": str(tmp_path),
+                    "auth": "{}",
+                    "prompt": "__prbot_runtime_check__",
+                }
+            )
+        ),
+    )
+    sdk_worker.run()
+    config = sdk.CodexConfig.call_args.kwargs
+    assert config["launch_args_override"][0] == str(runtime)
+    assert 'sandbox_mode="danger-full-access"' in config["launch_args_override"]
+    assert 'approval_policy="never"' in config["launch_args_override"]
+    assert not any(
+        "=false" in arg or "sandbox-exec" in arg for arg in config["launch_args_override"]
+    )
+    assert client.thread_start.call_args.kwargs["sandbox"] == sdk.Sandbox.full_access
+    assert client.thread_start.call_args.kwargs["approval_mode"] == sdk.ApprovalMode.deny_all

@@ -9,6 +9,10 @@ class DeliveryError(Exception):
     pass
 
 
+class CheckFailure(DeliveryError):
+    """Required checks finished unsuccessfully; distinct from an unreadable API response."""
+
+
 class GitHub:
     def __init__(self, token):
         self.client = httpx.AsyncClient(
@@ -32,7 +36,9 @@ class GitHub:
             return response.json() if response.content else {}
         except httpx.HTTPError:
             # URLs/response bodies may include private task context; never echo raw exceptions.
-            raise DeliveryError("GitHub 请求未确认，请检查网络、凭据和目标仓库权限。") from None
+            raise DeliveryError(
+                "GitHub request unconfirmed. Check network, sign-in and repository access."
+            ) from None
 
     async def repository(self, repo):
         result = await self.request("GET", f"/repos/{repo}")
@@ -41,7 +47,9 @@ class GitHub:
             or result.get("disabled")
             or not result.get("permissions", {}).get("push")
         ):
-            raise DeliveryError("仓库不可写：请检查是否归档及 Contents/PR/Issues 写入权限。")
+            raise DeliveryError(
+                "Repository is not writable. Check archive state and write permissions."
+            )
         # Read the API surfaces needed for subsequent writes before executing any code task.
         await self.request("GET", f"/repos/{repo}/pulls", params={"per_page": 1})
         await self.request("GET", f"/repos/{repo}/issues", params={"per_page": 1})
@@ -53,7 +61,9 @@ class GitHub:
         existing = await self.request("GET", f"/repos/{repo}/pulls", params=params)
         if existing:
             if existing[0]["state"] != "open":
-                raise DeliveryError("任务对应 PR 已关闭，请人工检查，未重复创建 PR。")
+                raise DeliveryError(
+                    "The task PR is closed. Review it manually; no duplicate PR was created."
+                )
             return existing[0]
         try:
             return await self.request(
@@ -105,13 +115,13 @@ class GitHub:
             }
             for k in required
         ):
-            raise DeliveryError("远端必需检查失败；请打开 PR 的 Checks 排查，未报告完成。")
+            raise CheckFailure("Required remote checks failed. Open the PR Checks tab.")
         return all(values.get(k) == "success" for k in required)
 
     async def ready(self, repo, number, expected_sha=None):
         pr = await self.request("GET", f"/repos/{repo}/pulls/{number}")
         if expected_sha and pr["head"]["sha"] != expected_sha:
-            raise DeliveryError("PR 代码已被修改，需重新验证；未报告完成。")
+            raise DeliveryError("PR head changed. Revalidate before marking complete.")
         if not pr["draft"]:
             return
         try:
@@ -126,7 +136,9 @@ class GitHub:
                 },
             )
             if result.get("errors"):
-                raise DeliveryError("PR 转为待审失败，请检查 Pull requests 写入权限。")
+                raise DeliveryError(
+                    "Unable to mark PR ready. Check pull request write permissions."
+                )
         except DeliveryError:
             current = await self.request("GET", f"/repos/{repo}/pulls/{number}")
             if current["draft"]:
@@ -136,13 +148,13 @@ class GitHub:
         path = f"/repos/{repo}/issues/{number}"
         current = await self.request("GET", path)
         if current["state"] == "closed":
-            return "已关闭（核对远端）"
+            return "Closed (verified remotely)"
         try:
             await self.request("PATCH", path, json={"state": "closed", "state_reason": "completed"})
         except DeliveryError:
             if (await self.request("GET", path))["state"] != "closed":
                 raise
-        return "已关闭"
+        return "Closed"
 
     async def wait_checks(self, task, required, timeout):
         async with asyncio.timeout(timeout):

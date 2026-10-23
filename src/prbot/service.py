@@ -6,7 +6,7 @@ import sys
 import time
 from pathlib import Path
 
-from prbot.config import ConfigError, save_settings
+from prbot.config import ConfigError
 from prbot.paths import data_dir
 
 LABEL = "org.prbot.agent"
@@ -19,7 +19,9 @@ def agent_path():
 def launchctl(*args, check=True):
     result = subprocess.run(["/bin/launchctl", *args], capture_output=True, text=True, timeout=20)
     if check and result.returncode:
-        raise ConfigError("launchd 操作失败，请在已登录的 macOS 用户会话中操作并检查状态。")
+        raise ConfigError(
+            "launchd operation failed. Use a logged-in macOS session and check status."
+        )
     return result
 
 
@@ -33,12 +35,12 @@ def executable():
         if not str(path).startswith(
             ("/Applications/PRBot.app/", str(Path.home() / "Applications/PRBot.app") + "/")
         ):
-            raise ConfigError("请先把 PRBot.app 拖到 Applications，再打开应用启动服务。")
+            raise ConfigError("Move PRBot.app to Applications, then open it to start the service.")
         return [str(path), "run"]
     return [sys.executable, "-m", "prbot.main", "run"]
 
 
-def install(autostart):
+def install():
     program = executable()
     stop()
     path = agent_path()
@@ -57,22 +59,22 @@ def install(autostart):
     path.write_bytes(plistlib.dumps(spec))
     path.chmod(0o600)
     try:
+        report("starting", "Waiting for the background health check.")
         launchctl("bootstrap", domain(), str(path))
     except ConfigError:
         path.unlink(missing_ok=True)
         raise
-    save_settings({"PRBOT_AUTOSTART": str(autostart).lower()})
-    if not autostart:
-        # Loaded in the current session but not installed for subsequent logins.
-        path.unlink()
+    # Current login session only. Never leave a registration for the next login.
+    path.unlink(missing_ok=True)
 
 
 def stop():
     launchctl("bootout", f"{domain()}/{LABEL}", check=False)
     # Never delete registration if a running job could not be unloaded.
     if launchctl("print", f"{domain()}/{LABEL}", check=False).returncode == 0:
-        raise ConfigError("后台服务未能停止，请检查当前用户权限。")
+        raise ConfigError("Background service did not stop. Check current user permissions.")
     agent_path().unlink(missing_ok=True)
+    report("stopped", "Service stopped.")
 
 
 def report(state, detail):
@@ -90,18 +92,21 @@ def status():
         last = json.loads(path.read_text())
     except (OSError, ValueError):
         last = {}
-    from prbot.config import read_settings
+    from prbot.config import env_path, workspace_directory
 
-    selected = read_settings().get("PRBOT_WORK_ROOT")
-    workspace = (
-        str(Path(selected) / "PRBot-workspaces") if selected else str(data_dir() / "workspaces")
-    )
-    from prbot.config import env_path
+    workspace = str(workspace_directory())
 
     return {
         "env_file": str(env_path()),
         "workspace_root": workspace,
         "agent_loaded": loaded,
-        "autostart": agent_path().exists(),
         "last_service_report": last,
     }
+
+
+def migrate_registration():
+    """Remove old persistent registration without starting a service."""
+    agent_path().unlink(missing_ok=True)
+    from prbot.config import save_settings
+
+    save_settings({})

@@ -1,16 +1,13 @@
-"""Local-only macOS window. Credentials stay in native dialogs and the existing stores."""
+"""Local WebKit window with a validated native bridge and shared task service."""
 
 import asyncio
 import getpass
 import json
-import re
 import sys
 from pathlib import Path
 from threading import Thread
 
-from prbot.config import Config, ConfigError
-from prbot.main import validate_api
-from prbot.tasks import repository_url
+from prbot.config import ConfigError, env_path
 
 
 def asset_directory():
@@ -19,25 +16,71 @@ def asset_directory():
     return Path(__file__).resolve().parents[2] / "frontend/dist"
 
 
-def prepare_draft(value):
-    """Prepare Telegram text; never impersonate a Telegram update or bypass its policy."""
-    if not isinstance(value, str) or len(value) > 3500:
-        raise ConfigError("请输入仓库链接和需求，合计不超过 3500 字。")
-    parts = value.strip().split(maxsplit=1)
+SETTINGS_ACTIONS = {
+    "connections",
+    "use_id_token",
+    "fetch_codex_id_token",
+    "configuration",
+    "save_configuration",
+}
+
+
+def native_request(body):
+    """Copy nested Foundation dictionaries before passing a request to a thread."""
+
+    def mapping(value):
+        if hasattr(value, "items"):
+            return dict(value.items())
+        raise TypeError
+
     try:
-        repo = repository_url(parts[0] if parts else "")
-    except ValueError as error:
-        raise ConfigError(str(error)) from None
-    if len(parts) != 2 or len(parts[1].strip()) < 8:
-        raise ConfigError("请在仓库链接后填写至少 8 个字的具体需求。")
-    return f"https://github.com/{repo}\n{parts[1].strip()}"
+        return json.loads(json.dumps(dict(body), default=mapping))
+    except (TypeError, ValueError, OverflowError):
+        raise ConfigError("Invalid request data. Reload the window and retry.") from None
 
 
-def bot_url():
-    username = asyncio.run(validate_api(Config.load().token))
-    if not isinstance(username, str) or not re.fullmatch(r"[A-Za-z0-9_]{5,32}", username):
-        raise ConfigError("无法识别 Bot 用户名，请检查 Telegram 配置。")
-    return "https://t.me/" + username
+def settings_request(action, request):
+    """Settings operations shared by the validated native bridge and remote tests."""
+    from prbot.config import bootstrap_form, save_bootstrap_form
+    from prbot.execution_setup import codex_login, fetch_codex_id_token
+    from prbot.secrets import bootstrap, clear_cache, load_secrets
+
+    if action == "fetch_codex_id_token":
+        return "ID token fetched. Choose Use token to apply it in this window.", {
+            "id_token_result": {"token": fetch_codex_id_token(), "applied": False}
+        }
+    if action == "use_id_token":
+        token = request.get("text")
+        if not isinstance(token, str) or not token.strip():
+            raise ConfigError("Enter a Codex ID token before choosing Use token.")
+        auth = json.loads(codex_login(token))
+        return "ID token applied in this window only.", {
+            "id_token_result": {"token": auth["tokens"]["id_token"], "applied": True}
+        }
+    if action == "configuration":
+        return "Configuration loaded. Changes are saved only when you choose Save configuration.", {
+            "configuration": bootstrap_form()
+        }
+    if action == "save_configuration":
+        form = save_bootstrap_form(request.get("configuration"), request.get("configuration_path"))
+        clear_cache()
+        return (
+            "Configuration saved. Restart PRBot to apply it to all services. "
+            "Process environment variables keep priority.",
+            {"configuration": form},
+        )
+    if action == "connections":
+        auth = codex_login()
+        load_secrets(refresh=True)
+        cfg = bootstrap()
+        return "Connections refreshed. ID token changes apply in this window only.", {
+            "connections": {
+                "id_token": json.loads(auth)["tokens"]["id_token"],
+                "infisical": "Connected",
+                "project": cfg["INFISICAL_PROJECT_ID"],
+            }
+        }
+    raise ConfigError("Unsupported settings request.")
 
 
 def show(check_output=None):
@@ -49,10 +92,40 @@ def show(check_output=None):
     from PyObjCTools import AppHelper
 
     from prbot import service
+    from prbot.conversation_service import ConversationService
     from prbot.ui import ACTIONS, perform_action
+
+    # Separate event loop owns the task runner; no model/network operation blocks AppKit.
+    loop = asyncio.new_event_loop()
+    stop = asyncio.Event()
+    runtime = {"service": None, "task": None}
+
+    async def run_tasks():
+        while not stop.is_set():
+            try:
+                runtime["service"] = ConversationService()
+                await runtime["service"].run(stop, source="desktop")
+            except ConfigError:
+                await asyncio.sleep(3)
+
+    def background():
+        asyncio.set_event_loop(loop)
+        runtime["task"] = loop.create_task(run_tasks())
+        try:
+            loop.run_until_complete(runtime["task"])
+        except asyncio.CancelledError:
+            pass
+
+    worker_thread = Thread(target=background, daemon=True)
+    worker_thread.start()
+    service.migrate_registration()
 
     class WindowDelegate(NSObject):
         def windowWillClose_(self, notification):
+            loop.call_soon_threadsafe(stop.set)
+            if runtime["task"]:
+                loop.call_soon_threadsafe(runtime["task"].cancel)
+            worker_thread.join(timeout=5)
             AppKit.NSApplication.sharedApplication().terminate_(None)
 
     # Register the block ABI on our delegate explicitly. The packaged runtime on
@@ -75,95 +148,161 @@ def show(check_output=None):
 
     class Bridge(NSObject):
         busy = False
+        control_verified_at = 0
 
         @objc.python_method
-        def deliver(self, message, ok=True):
+        def deliver(self, message=None, ok=True, extra=None):
             payload = {"message": message, "ok": ok, "busy": self.busy}
             try:
                 state = service.status()
-                # Allow only known safe status fields across the bridge. No settings or tokens.
                 report = state.get("last_service_report", {})
+                import time
+
+                loaded = bool(state["agent_loaded"])
+                health = report.get("state", "unknown")
+                if not loaded and health not in {"halted", "crashed"}:
+                    health = "stopped"
+                if loaded and time.time() - report.get("time", 0) > 15:
+                    health = "stale"
                 payload["status"] = {
                     "user": getpass.getuser(),
-                    "loaded": bool(state["agent_loaded"]),
-                    "autostart": bool(state["autostart"]),
-                    "state": report.get("state", "unknown"),
+                    "loaded": loaded,
+                    "state": health,
+                    "reported_at": report.get("time"),
+                    "control_verified": time.time() - self.control_verified_at < 10,
+                    "detail": report.get("detail", ""),
                     "workspace": state["workspace_root"],
+                    "configuration": str(env_path().parent),
                 }
             except Exception:
                 payload["status"] = {"state": "unavailable"}
+            payload.update(extra or {})
             self.web.evaluateJavaScript_completionHandler_(
                 "window.receiveNative(" + json.dumps(payload, ensure_ascii=True) + ")", None
             )
 
         def userContentController_didReceiveScriptMessage_(self, controller, message):
-            # Accept only the bundled top-level document, not subframes or remote content.
             if not message.frameInfo().isMainFrame():
                 return
             if self.web.URL() is None or self.web.URL().path() != str(self.page):
                 return
             body = message.body()
-            if not hasattr(body, "get"):
-                self.deliver("不支持的请求。", False)
+            allowed = (
+                ACTIONS
+                | SETTINGS_ACTIONS
+                | {
+                    "ready",
+                    "open_github",
+                    "refresh_service",
+                    "submit_message",
+                    "history",
+                    "retry_save",
+                    "tasks",
+                }
+            )
+            if (
+                not hasattr(body, "get")
+                or not isinstance(body.get("action"), str)
+                or body.get("action") not in allowed
+            ):
+                self.deliver("Unsupported request.", False)
                 return
             action = body.get("action")
-            if not isinstance(action, str) or action not in ACTIONS | {"ready", "draft"}:
-                self.deliver("不支持的操作。", False)
+            if action == "refresh_service":
+                import time
+
+                self.control_verified_at = time.time()
+                self.deliver("Service process status verified.", extra={"completed_action": action})
                 return
             if action == "ready":
-                self.deliver(None)
+                self.deliver()
                 return
             if self.busy:
-                self.deliver("上一个操作仍在进行，请稍候。", False)
+                self.deliver(
+                    "An operation is still in progress. Please wait.",
+                    False,
+                    {"completed_action": action},
+                )
                 return
-            draft = None
-            if action == "draft":
-                try:
-                    draft = prepare_draft(body.get("text"))
-                except ConfigError as error:
-                    self.deliver(str(error), False)
-                    return
+            # JSON round trip prevents retaining PyObjC objects on a worker thread.
+            try:
+                request = native_request(body)
+            except ConfigError as error:
+                self.deliver(str(error), False, {"completed_action": action})
+                return
+            self.active_action = action
             self.busy = True
 
             def work():
                 try:
-                    if action == "draft":
-                        url = bot_url()
-                        AppHelper.callAfter(self.handoff, draft, url)
+                    extra = {}
+                    feedback = None
+                    if action == "open_github":
+                        from prbot.conversation_service import target_link
+
+                        link = request.get("text")
+                        target_link(link, "Pull Request")
+                        AppHelper.callAfter(self.open_github, link)
+                        return
+                    if action in ACTIONS:
+                        feedback = perform_action(action)
+                    elif action in SETTINGS_ACTIONS:
+                        feedback, extra = settings_request(action, request)
                     else:
-                        perform_action(action)
-                        AppHelper.callAfter(self.finish, "操作已结束；服务状态已刷新。", True)
+                        app_service = ConversationService()
+                        actor = "local:" + getpass.getuser()
+                        if action == "submit_message":
+                            task = asyncio.run(
+                                app_service.submit(
+                                    request.get("request_id"),
+                                    actor,
+                                    "desktop",
+                                    request.get("mode"),
+                                    request.get("link"),
+                                    request.get("text"),
+                                )
+                            )
+                            extra["accepted"] = task
+                            feedback = "Task accepted."
+                        elif action == "retry_save":
+                            asyncio.run(app_service.retry_save(request.get("text"), actor))
+                            feedback = "Message saved."
+                        elif action == "history":
+                            mode = request.get("mode")
+                            if mode not in {"Issue", "Pull Request"}:
+                                raise ConfigError("Choose a task mode.")
+                            cid = app_service.conversation(actor, "desktop", mode)
+                            extra["history"] = dict(
+                                asyncio.run(
+                                    app_service.archive.history(cid, request.get("cursor", "0"))
+                                ),
+                                mode=mode,
+                            )
+                        extra["tasks"] = app_service.tasks(actor)
+                    AppHelper.callAfter(self.finish, feedback, True, extra)
                 except ConfigError as error:
-                    AppHelper.callAfter(self.finish, str(error), False)
+                    AppHelper.callAfter(self.finish, str(error), False, {})
                 except Exception:
-                    # Never expose raw exceptions from OS, SDK or credential providers.
                     AppHelper.callAfter(
-                        self.finish, "操作未完成，请检查配置、网络或系统权限后重试。", False
+                        self.finish, "Operation failed. Check connections and retry.", False, {}
                     )
 
             Thread(target=work, daemon=True).start()
 
         @objc.python_method
-        def handoff(self, draft, url):
-            clipboard = AppKit.NSPasteboard.generalPasteboard()
-            clipboard.clearContents()
-            copied = clipboard.setString_forType_(draft, AppKit.NSPasteboardTypeString)
-            opened = AppKit.NSWorkspace.sharedWorkspace().openURL_(NSURL.URLWithString_(url))
-            if not copied:
-                self.finish("无法复制需求，请手动复制并在 Telegram 提交。", False)
-            elif not opened:
-                self.finish("需求已复制；无法打开 Telegram，请手动打开 Bot。", False)
-            else:
-                self.finish(
-                    "需求已复制并打开 Bot。先发送 /FinishIssue，收到提示后粘贴需求。"
-                    "当前尚未提交任务，Telegram 会校验身份及仓库权限。",
-                    True,
-                )
+        def open_github(self, link):
+            opened = AppKit.NSWorkspace.sharedWorkspace().openURL_(NSURL.URLWithString_(link))
+            self.finish(
+                "Pull request opened." if opened else "Could not open the pull request.",
+                bool(opened),
+                {},
+            )
 
         @objc.python_method
-        def finish(self, message, ok):
+        def finish(self, message, ok, extra):
             self.busy = False
-            self.deliver(message, ok)
+            self.deliver(message, ok, {**extra, "completed_action": self.active_action})
+            self.active_action = None
 
         @objc.typedSelector(b"v@:@@@?")
         def webView_decidePolicyForNavigationAction_decisionHandler_(

@@ -31,4 +31,4 @@ def test_registry():
 
 
 def test_tasks_disabled_has_actionable_message(update):
-    assert "未启用" in CommandRouter("MyBot").dispatch(update("/FinishIssue"))
+    assert "unavailable" in CommandRouter("MyBot").dispatch(update("/FinishIssue"))
