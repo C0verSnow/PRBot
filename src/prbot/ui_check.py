@@ -222,7 +222,9 @@ true;
   await select('Connections');
   const fetchToken = field('fetch-codex-id-token');
   await waitFor(() => !fetchToken.disabled); fetchToken.click(); await tick();
-  await waitFor(() => !fetchToken.disabled);
+  // The bridge unlocks controls before SettingsPanel's effect renders the token.
+  // Wait for the visible result as well, rather than racing that second render.
+  await waitFor(() => !fetchToken.disabled && field('id-token').value.startsWith('eyJ'));
   assert(field('id-token').value.startsWith('eyJ'), 'Fetch did not fill ID token');
   const fetched = field('id-token').value;
   edit(field('id-token'), 'ui-manual-id'); await tick();
@@ -231,12 +233,15 @@ true;
   assert(field('id-token').value === 'ui-manual-id', 'Fetch failure lost ID draft');
   const useToken = () => Array.from(document.querySelectorAll('button'))
     .find(b => b.textContent === 'Use token');
-  useToken().click(); await tick(); await waitFor(() => !fetchToken.disabled);
+  useToken().click(); await tick();
+  await waitFor(() => !fetchToken.disabled && useToken().disabled);
   assert(field('id-token').value === 'ui-manual-id', 'Manual apply lost ID token');
   assert(useToken().disabled, 'Applied ID token still dirty');
-  fetchToken.click(); await tick(); await waitFor(() => !fetchToken.disabled);
+  fetchToken.click(); await tick();
+  await waitFor(() => !fetchToken.disabled && field('id-token').value === fetched);
   assert(field('id-token').value === fetched, 'Fetch returned manual override');
-  useToken().click(); await tick(); await waitFor(() => !fetchToken.disabled);
+  useToken().click(); await tick();
+  await waitFor(() => !fetchToken.disabled && useToken().disabled);
   await select('Configuration');
   await waitFor(() => field('INFISICAL_URL') && !field('INFISICAL_URL').disabled);
   assert(field('INFISICAL_CLIENT_SECRET').type === 'password', 'Secret is visible');
@@ -253,7 +258,9 @@ true;
   await tick();
   assert(field('INFISICAL_CLIENT_SECRET').value === 'ui-secret-only', 'Save failure lost draft');
   field('save-configuration').click(); await tick();
-  await waitFor(() => !field('INFISICAL_URL').disabled);
+  await waitFor(() => !field('INFISICAL_URL').disabled
+    && field('save-configuration').disabled
+    && field('INFISICAL_CLIENT_SECRET').value === '');
   assert(field('save-configuration').disabled, 'Configuration not saved');
   assert(field('INFISICAL_CLIENT_SECRET').value === '', 'Secret echoed after save');
   assert(field('INFISICAL_CLIENT_SECRET').placeholder.includes('Configured'),
