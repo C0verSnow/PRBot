@@ -65,6 +65,7 @@ def schedule_check(web, output):
     def inspect_minimum():
         web.evaluateJavaScript_completionHandler_(
             """
+window.__uiCheckResult = 'pending';
 (async () => {
   const assert = (value, message) => { if (!value) throw new Error(message); };
   document.getElementById('user').click();
@@ -101,6 +102,7 @@ def schedule_check(web, output):
   assert(document.getElementById('save-configuration').getBoundingClientRect().bottom
     <= content.getBoundingClientRect().bottom, 'Save configuration cannot scroll');
   content.scrollTop = 0;
+  await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
   window.__uiCheckResult = 'ok';
 })().catch(error => { window.__uiCheckResult = 'failed:' + error.message; });
 true;
