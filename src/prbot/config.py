@@ -86,7 +86,7 @@ def save_bootstrap_form(values, expected_path):
         if (
             not isinstance(value, str)
             or len(value) > 20000
-            or any(ord(c) < 32 or ord(c) == 127 for c in value)
+            or any(ord(c) < 32 or ord(c) == 127 or c in "\x85\u2028\u2029" for c in value)
             or '"' in value
             or "'" in value
         ):
@@ -94,7 +94,8 @@ def save_bootstrap_form(values, expected_path):
         cleaned[key] = value.strip()
     # Validate the persisted file and the effective configuration before touching disk.
     existing = read_env(path)
-    if not cleaned["INFISICAL_CLIENT_SECRET"]:
+    keep_secret = not cleaned["INFISICAL_CLIENT_SECRET"]
+    if keep_secret:
         cleaned["INFISICAL_CLIENT_SECRET"] = existing.get("INFISICAL_CLIENT_SECRET", "")
     effective = dict(cleaned)
     effective.update({k: v for k, v in os.environ.items() if k in ENV_KEYS})
@@ -115,9 +116,13 @@ def save_bootstrap_form(values, expected_path):
         lines = []
         for line in (original or "").splitlines():
             key = line.strip().partition("=")[0].strip()
-            if key not in ENV_KEYS:
+            if key not in ENV_KEYS or (key == "INFISICAL_CLIENT_SECRET" and keep_secret):
                 lines.append(line)
-        lines.extend(key + "=" + cleaned[key] for key in sorted(ENV_KEYS))
+        lines.extend(
+            key + "=" + cleaned[key]
+            for key in sorted(ENV_KEYS)
+            if key != "INFISICAL_CLIENT_SECRET" or not keep_secret
+        )
         fd, temporary = tempfile.mkstemp(prefix=".prbot-env-", dir=path.parent)
         with os.fdopen(fd, "w") as out:
             out.write("\n".join(lines) + "\n")

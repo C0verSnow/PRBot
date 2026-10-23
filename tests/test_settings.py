@@ -154,6 +154,18 @@ def test_configuration_preserves_process_priority(tmp_path, monkeypatch):
     assert read_env()["INFISICAL_PROJECT_ID"] == "test-project"
 
 
+def test_blank_secret_retains_original_quoted_line_exactly(tmp_path):
+    path = tmp_path / ".env"
+    line = 'INFISICAL_CLIENT_SECRET="  original-secret  "\n'
+    path.write_text(line)
+    path.chmod(0o600)
+    values = fields()
+    values["INFISICAL_CLIENT_SECRET"] = ""
+    save_bootstrap_form(values, str(path))
+    assert line in path.read_text()
+    assert read_env()["INFISICAL_CLIENT_SECRET"] == "  original-secret  "
+
+
 @pytest.mark.parametrize(
     "key,value",
     [
@@ -169,6 +181,7 @@ def test_configuration_preserves_process_priority(tmp_path, monkeypatch):
         ("INFISICAL_ENVIRONMENT", ""),
         ("INFISICAL_SECRET_PATH", "relative"),
         ("INFISICAL_CLIENT_SECRET", "private-secret\nINJECT=value"),
+        ("INFISICAL_CLIENT_SECRET", "private-secret\u2028INJECT=value"),
         ("INFISICAL_CLIENT_SECRET", "'private-secret'"),
     ],
 )
