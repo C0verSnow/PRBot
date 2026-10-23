@@ -374,6 +374,7 @@ class ConversationService:
                 token = github_token(self.values) if payload["kind"] != "chat" else ""
                 self.runtime_secrets.append(token)
                 basic = base64.b64encode(("x-access-token:" + token).encode()).decode()
+                self.runtime_secrets.append(basic)
                 adapter = CodexAdapter(
                     codex_login(),
                     environment={
@@ -430,7 +431,7 @@ class ConversationService:
                     "If you need information, return needs_clarification and ask in summary."
                 )
                 prompt = json.dumps(private_prompt, ensure_ascii=False)
-            if isinstance(adapter, CodexAdapter):
+            if not self.adapter:
 
                 async def on_event(event):
                     self.event(tid, event["type"], event.get("text", ""))
