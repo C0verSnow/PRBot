@@ -6,13 +6,13 @@
 
 | 需求 | 修改位置 | 实现及边界 |
 | --- | --- | --- |
-| FR-01 执行反馈、回答、历史 | `src/prbot/sdk_worker.py:27`、`:48`，`codex_adapter.py:115`，`conversation_service.py:134`、`:228`、`:249`、`:313`、`:350`、`:505`，`desktop.py:275`，`frontend/src/App.tsx:12`、`components/TaskFeed.tsx:4` | Worker 输出 v1 NDJSON；控制器逐行处理；只允许状态、过滤后的助理说明和明确问题。原任务保存提问和多轮答案、重启恢复、回答幂等和 actor/source 校验。Chat History 独立浏览三类历史及具体会话；私人聊天使用只读沙箱，不注入 GitHub Token、不进入交付验证。 |
-| FR-02 输出位置、顺序、滚动 | `frontend/src/App.tsx:59`，`components/TaskFeed.tsx:4`，`style.css:51` | 输入框在执行区上方；事件有时间和稳定序号。查看旧日志不自动跳底，在底部附近才跟随。消息已在历史展示时不重复展示同一最终结果。 |
+| FR-01 执行反馈、回答、历史 | `src/prbot/sdk_worker.py:27`、`:48`，`codex_adapter.py:115`，`conversation_service.py:148`、`:242`、`:263`、`:327`、`:364`、`:520`，`desktop.py:275`，`frontend/src/App.tsx:12`、`components/TaskFeed.tsx:4` | Worker 输出 v1 NDJSON；控制器逐行处理；只允许状态、过滤后的助理说明和明确问题。原任务保存提问和多轮答案、重启恢复、回答幂等和 actor/source 校验。Chat History 独立浏览三类历史及具体会话；私人聊天使用只读沙箱，不注入 GitHub Token、不进入交付验证。 |
+| FR-02 输出位置、顺序、滚动 | `frontend/src/App.tsx:68`，`components/TaskFeed.tsx:4`，`style.css:51` | 输入框在执行区上方；事件有时间和稳定序号。查看旧日志不自动跳底，在底部附近才跟随。消息已在历史展示时不重复展示同一最终结果。 |
 | FR-03 图标 | `frontend/src/components/Icon.tsx:2`、`Sidebar.tsx:5`、`EmptyState.tsx:8` | 统一 24×24 SVG、1.6 线宽和 currentColor。Issue 用圆形问题图标、PR 用分支连线、品牌用机器人。只更新界面品牌；检查 `packaging/PRBot.spec` 确认前端资源随包，未修改 Dock / Finder 图标。 |
-| FR-04 原生粘贴 | `src/prbot/desktop.py:351`，`frontend/src/bridge.ts:3`，`components/SettingsPanel.tsx:63`，`src/prbot/ui_check.py:126` | 原生窗口加入标准 Edit 菜单，通过响应链分派 Cmd+V / Cmd+C / Cmd+X / Cmd+A；后台请求不再禁用输入框。远端实际验证文本、密码、URL 和多行控件粘贴后的 React 值及焦点。 |
+| FR-04 原生粘贴 | `src/prbot/desktop.py:351`，`frontend/src/bridge.ts:3`，`components/SettingsPanel.tsx:63`，`src/prbot/ui_check.py:129` | 原生窗口加入标准 Edit 菜单，通过响应链分派 Cmd+V / Cmd+C / Cmd+X / Cmd+A；后台请求不再禁用输入框。远端实际验证文本、密码、URL 和多行控件粘贴后的 React 值及焦点。 |
 | FR-05 关闭按钮焦点 | `frontend/src/components/SettingsPanel.tsx:68`，`style.css:47` | 原因是 dialog 初始聚焦按钮叠加全局橙色 focus-visible。关闭按钮改为圆形交互区和深色圆形键盘焦点；全局焦点提示保留；未保存确认流程保留。 |
 | FR-06 首页文案 | `frontend/src/components/EmptyState.tsx:3`、`Composer.tsx:9` | 分别使用需求建议的 Issue、PR 标题说明，输入提示对应实际操作；私人会话明确说明历史保存和发布边界。 |
-| FR-07 卡顿与刷新 | `frontend/src/bridge.ts:3`、`App.tsx:49`，`components/SettingsPanel.tsx:63`，`src/prbot/desktop.py:164`、`:217`、`:324` | Connections / history / tasks / ready 是后台读取，不占用用户操作锁；原生状态读取从 AppKit 主线程移到后台，响应使用缓存。按动作去重和关联回复、旧任务快照保护、切换历史请求排队；数据未变则保留 React 状态身份。连接失败保留旧数据和错误提示。 |
+| FR-07 卡顿与刷新 | `frontend/src/bridge.ts:3`、`App.tsx:48`，`components/SettingsPanel.tsx:63`，`src/prbot/desktop.py:164`、`:217`、`:326` | Connections / history / tasks / ready 是后台读取，不占用用户操作锁；原生状态读取从 AppKit 主线程移到后台，响应使用缓存。按动作去重和关联回复、旧任务快照保护、切换历史请求排队；数据未变则保留 React 状态身份。连接失败保留旧数据和错误提示。 |
 
 `conversation_store.py` 的 Upstash 数据结构、原子容量限制和分页保持兼容。首次执行的助理消息仍使用旧 ID；回答后的轮次采用后缀，避免覆盖旧问题，同时保持原有提供商验收清理逻辑兼容。SQLite 只新增事件和答案表，不删除既有记录。
 
@@ -30,7 +30,7 @@
 
 - [首轮远端 CI 39974242241](https://github.com/C0verSnow/PRBot/actions/runs/39974242241)：前端检查和构建通过；183 个 Python 通过、1 个既有交付测试失败。失败暴露新增类型判断与适配器工厂替身不兼容，已移除该类型耦合，保留原测试断言。
 - [远端 CI 39974450225](https://github.com/C0verSnow/PRBot/actions/runs/39974450225)：184 个 Python 测试、前端检查/构建、源码及安装包真实 WebKit、DMG 挂载复制和嵌入运行时均通过。已下载源码 UI JSON 核对 `ok=true` 并查看截图。
-- 后续补充了 Worker 实际事件筛选测试、跨动作旧任务快照保护、历史切换请求排队、日志滚动和回答任务归属的 WebKit 验证。最终提交结果在此记录追加。
+- 后续补充了 Worker 实际事件筛选测试、跨动作旧任务快照保护、历史切换请求排队、日志滚动和回答任务归属的 WebKit 验证。最终交付提交继续由同一 PR 的 required test / dmg 检查验证，以 PR Checks 为准。
 
 自动化覆盖：原目标及同任务回答、其他 actor/source 拒绝访问、重复回答、归档失败不继续、重启后等待状态、不同轮次结果不覆盖、私人聊天不调用 GitHub 验证、超时分类、事件凭据过滤、输出数量限制、最终结果前收到事件、真实 SDK 初始化和已有 GitHub / Telegram 回归。
 
@@ -42,8 +42,18 @@
 
 ![改动前的任务与输入区域](images/pr10-delivery.png)
 
-最终源码及安装包截图将在 CI 完成后补入，包含首页、等待回答和最小窗口配置页。
+改动后的真实安装包 WebKit 截图（`2a2d54e`，CI 39975518137）：已核对工件 `PRBot-ui.json` 为 `ok=true`；该次任务在安装包检查收尾阶段因新提交取消，截图证明窗口交互，不将整轮 CI 算通过。后续 SDK 元数据处理修改没有改变界面。
 
-本次不声称已经完成用户实际账号的付费 SDK 多轮问答和真实服务断线重连验收；这些需要专门的提供商 acceptance 环境，不能用模拟任务截图替代。键盘菜单粘贴是远端真实 AppKit/WebKit 验证，未在用户当前安装包上操作。
+![改动后首页与导航](images/issue11-home.png)
+
+![输入下方的执行日志及原任务回答入口](images/issue11-feedback.png)
+
+![最小窗口配置页与圆形键盘焦点](images/issue11-settings-minimum.png)
+
+首页截图使用全新测试 HOME，红色提示表示没有配置 Infisical 测试连接。执行区使用有明确 fixture 提示的模拟任务；日期从 Unix 1 开始，绝不作为付费 SDK 执行证据。截图原文件直接来自远端安装包工件，未重绘或修改。
+
+本次不声称已经完成用户实际账号的付费 SDK 多轮问答和真实服务断线重连验收；这些需要专门的提供商 acceptance 环境，不能用模拟任务截图替代。已查询 Actions Secret 配置，`PRBOT_ACCEPTANCE_BOOTSTRAP` 和 `PRBOT_ACCEPTANCE_CODEX_AUTH` 均未配置；一次手动验收流程在执行前被并发 PR 流水线取消，不能算验收。用户明确回复“没有，先交付 PR 并注明验收待办”。真实提供商多轮和服务断线重连保留待办，没有上传本机私人 Codex 登录。键盘菜单粘贴是远端真实 AppKit/WebKit 验证，未在用户当前安装包上操作。
+
+Pull Request：[PR #12](https://github.com/C0verSnow/PRBot/pull/12)。
 
 Issue #11 要求验收并完成必要合并流程后才能关闭；创建 PR 不提前关闭，也不自动合并。当前保持打开供维护者审查。
