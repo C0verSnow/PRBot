@@ -25,6 +25,20 @@ SETTINGS_ACTIONS = {
 }
 
 
+def native_request(body):
+    """Copy nested Foundation dictionaries before passing a request to a thread."""
+
+    def mapping(value):
+        if hasattr(value, "items"):
+            return dict(value.items())
+        raise TypeError
+
+    try:
+        return json.loads(json.dumps(dict(body), default=mapping))
+    except (TypeError, ValueError, OverflowError):
+        raise ConfigError("Invalid request data. Reload the window and retry.") from None
+
+
 def settings_request(action, request):
     """Settings operations shared by the validated native bridge and remote tests."""
     from prbot.config import bootstrap_form, save_bootstrap_form
@@ -207,7 +221,11 @@ def show(check_output=None):
                 self.deliver("An operation is still in progress. Please wait.", False)
                 return
             # JSON round trip prevents retaining PyObjC objects on a worker thread.
-            request = json.loads(json.dumps(dict(body)))
+            try:
+                request = native_request(body)
+            except ConfigError as error:
+                self.deliver(str(error), False)
+                return
             self.busy = True
 
             def work():

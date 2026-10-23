@@ -2,13 +2,14 @@
 
 import base64
 import json
+from collections import UserDict
 from pathlib import Path
 from unittest.mock import Mock
 
 import pytest
 
 from prbot.config import ConfigError, bootstrap_form, read_env, save_bootstrap_form
-from prbot.desktop import settings_request
+from prbot.desktop import native_request, settings_request
 from prbot.execution_setup import codex_login, fetch_codex_id_token
 
 
@@ -35,6 +36,19 @@ def fields():
         "INFISICAL_ENVIRONMENT": "dev",
         "INFISICAL_SECRET_PATH": "/",
     }
+
+
+def test_native_bridge_copies_nested_mapping_before_worker_thread():
+    # Foundation dictionaries implement mapping APIs but are not Python dicts.
+    native = UserDict({"action": "save_configuration", "configuration": UserDict(fields())})
+    result = native_request(native)
+    assert result == {"action": "save_configuration", "configuration": fields()}
+    assert type(result["configuration"]) is dict
+
+
+def test_native_bridge_invalid_object_returns_error_instead_of_crashing():
+    with pytest.raises(ConfigError, match="Invalid request data"):
+        native_request({"configuration": object()})
 
 
 def test_fetch_reads_native_id_without_touching_login_or_infisical(tmp_path, monkeypatch):
