@@ -347,25 +347,39 @@ async def test_empty_or_oversized_descriptions_are_rejected(app, text):
     app.archive.save.assert_not_awaited()
 
 
-@pytest.mark.parametrize("checks,expected", [(False, "pending"), (True, "passed"),
-                                             ("failure", "failed"), ("network", "unknown")])
+@pytest.mark.parametrize(
+    "checks,expected",
+    [(False, "pending"), (True, "passed"), ("failure", "failed"), ("network", "unknown")],
+)
 async def test_delivery_preserves_pr_and_closed_issue_when_checks_not_passed(
     app, monkeypatch, checks, expected
 ):
     from prbot.github import DeliveryError
 
-    github = Mock(request=AsyncMock(side_effect=[
-        {"state": "open", "head": {"sha": "head"}},
-        {"state": "closed"},
-        {"state": "open", "head": {"sha": "head"}},
-    ]), checks=AsyncMock(return_value=checks), close=AsyncMock())
+    github = Mock(
+        request=AsyncMock(
+            side_effect=[
+                {"state": "open", "head": {"sha": "head"}},
+                {"state": "closed"},
+                {"state": "open", "head": {"sha": "head"}},
+            ]
+        ),
+        checks=AsyncMock(return_value=checks),
+        close=AsyncMock(),
+    )
     if checks == "failure":
-        github.checks.side_effect = DeliveryError("Required remote checks failed. Open the PR Checks tab.")
+        github.checks.side_effect = DeliveryError(
+            "Required remote checks failed. Open the PR Checks tab."
+        )
     if checks == "network":
         github.checks.side_effect = DeliveryError("GitHub request unconfirmed.")
     monkeypatch.setattr("prbot.github.GitHub", lambda token: github)
-    result = {"summary": "Implemented", "outcome": "completed",
-              "pr_url": "https://github.com/o/r/pull/1", "validation": "SDK reports success"}
+    result = {
+        "summary": "Implemented",
+        "outcome": "completed",
+        "pr_url": "https://github.com/o/r/pull/1",
+        "validation": "SDK reports success",
+    }
     await app.verify_delivery({"repo": "o/r", "kind": "issues", "number": 9}, result, "token")
     assert result["delivery"]["pr"] == "open"
     assert result["delivery"]["issue"] == "closed"
