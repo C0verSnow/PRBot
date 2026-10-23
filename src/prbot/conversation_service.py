@@ -108,18 +108,32 @@ class ConversationService:
             db.close()
 
     def clean(self, text):
-        secrets = list(self.values.values()) + self.runtime_secrets
+        values = dict(self.values)
+        secrets = list(values.values()) + self.runtime_secrets
+        sensitive = list(self.runtime_secrets)
         try:
             from prbot.secrets import bootstrap
 
-            secrets.extend(bootstrap().values())
+            values.update(bootstrap())
+            secrets.extend(values.values())
         except ConfigError:
             pass
+        sensitive.extend(
+            value
+            for key, value in values.items()
+            if any(word in key.upper() for word in ("TOKEN", "SECRET", "PASSWORD"))
+        )
         try:
             auth = json.loads(codex_login())
-            secrets.extend(auth.get("tokens", {}).values())
+            sensitive.extend(auth.get("tokens", {}).values())
         except ConfigError:
             pass
+        for value in sorted(
+            {value for value in sensitive if isinstance(value, str) and value},
+            key=len,
+            reverse=True,
+        ):
+            text = text.replace(value, "[REDACTED]")
         return redact(text, secrets)
 
     @staticmethod
@@ -384,6 +398,7 @@ class ConversationService:
                     codex_login(),
                     environment={
                         "GH_TOKEN": token,
+                        "GITHUB_TOKEN": token,
                         "GIT_TERMINAL_PROMPT": "0",
                         "GIT_CONFIG_COUNT": "1",
                         "GIT_CONFIG_KEY_0": "http.https://github.com/.extraheader",

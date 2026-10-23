@@ -226,3 +226,10 @@ def test_worker_streams_safe_commentary_and_omits_tool_output(tmp_path, monkeypa
     assert all(event["v"] == 1 for event in envelopes)
     assert envelopes[-1]["result"] == response
     assert client.thread_start.call_args.kwargs["sandbox"] == sdk.Sandbox.read_only
+
+
+def test_short_token_values_are_redacted_before_journaling(app):
+    app.values["SERVICE_TOKEN"] = "tiny"
+    app.event("task", "text", "private value: tiny")
+    with app.db() as db:
+        assert "tiny" not in db.execute("SELECT text FROM task_events").fetchone()[0]
