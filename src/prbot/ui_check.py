@@ -1,6 +1,8 @@
 """Remote CI only: exercise the packaged WebKit UI and export a real window snapshot."""
 
+import base64
 import json
+from pathlib import Path
 import os
 
 
@@ -9,6 +11,16 @@ def schedule_check(web, output):
     import WebKit
     from PyObjCTools import AppHelper
 
+    # The ui-check entry point has already selected a disposable HOME.
+    auth_path = Path.home() / ".codex/auth.json"
+    auth_path.parent.mkdir(mode=0o700)
+    def encode(value):
+        return base64.urlsafe_b64encode(json.dumps(value).encode()).decode().rstrip("=")
+
+    fixture_token = encode({"alg": "RS256"}) + "." + encode({"sub": "ui-test"}) + ".c2ln"
+    original_auth = json.dumps({"tokens": {"id_token": fixture_token, "access_token": "ui-access-only"}})
+    auth_path.write_text(original_auth)
+    auth_path.chmod(0o600)
     finished = False
     interaction_error = None
     minimum = False
@@ -17,6 +29,8 @@ def schedule_check(web, output):
         nonlocal finished
         if finished:
             return
+        if auth_path.read_text() != original_auth:
+            ok, detail = False, "Fetching or applying the ID token modified native credentials"
         finished = True
         output.with_suffix(".json").write_text(json.dumps({"ok": ok, "detail": detail}))
         # AppHelper.stopEventLoop may terminate NSApplication with exit status 0.
@@ -133,12 +147,58 @@ true;
   document.getElementById('user').click();
   await tick();
   assert(document.getElementById('settings').open);
-  assert(document.querySelectorAll('[data-section]').length === 3);
+  assert(document.querySelectorAll('[data-section]').length === 4);
   assert(document.querySelectorAll('.workspace-row').length === 2);
   const buttons = Array.from(document.querySelectorAll('.workspace-row button'));
   assert(buttons[0].getBoundingClientRect().width === buttons[1].getBoundingClientRect().width);
   assert(buttons[0].getBoundingClientRect().right === buttons[1].getBoundingClientRect().right);
-  document.querySelector('[data-section="Background Service"]').click();
+  const waitFor = async predicate => {
+    for (let count = 0; count < 300; count++) { if (predicate()) return; await tick(); }
+    throw new Error('Settings native response timed out');
+  };
+  const select = async name => {
+    const button = document.querySelector('[data-section="' + name + '"]');
+    await waitFor(() => !button.disabled); button.click(); await tick();
+  };
+  await select('Connections');
+  const fetchToken = document.getElementById('fetch-codex-id-token');
+  await waitFor(() => !fetchToken.disabled); fetchToken.click(); await tick();
+  await waitFor(() => !fetchToken.disabled);
+  assert(document.getElementById('id-token').value.startsWith('eyJ'), 'Fetch did not fill ID token');
+  const fetched = document.getElementById('id-token').value;
+  edit(document.getElementById('id-token'), 'ui-manual-id'); await tick();
+  window.receiveNative({ok:false, message:'Cannot read Codex credentials. Check read permissions.'});
+  await tick();
+  assert(document.getElementById('id-token').value === 'ui-manual-id', 'Fetch failure lost ID draft');
+  const useToken = () => Array.from(document.querySelectorAll('button')).find(b => b.textContent === 'Use token');
+  useToken().click(); await tick(); await waitFor(() => !fetchToken.disabled);
+  assert(document.getElementById('id-token').value === 'ui-manual-id', 'Manual apply lost ID token');
+  assert(useToken().disabled, 'Applied ID token still dirty');
+  fetchToken.click(); await tick(); await waitFor(() => !fetchToken.disabled);
+  assert(document.getElementById('id-token').value === fetched, 'Fetch returned manual override');
+  useToken().click(); await tick(); await waitFor(() => !fetchToken.disabled);
+  await select('Configuration');
+  await waitFor(() => document.getElementById('INFISICAL_URL') && !document.getElementById('INFISICAL_URL').disabled);
+  assert(document.getElementById('INFISICAL_CLIENT_SECRET').type === 'password', 'Secret is visible');
+  const values = {INFISICAL_URL:'http://127.0.0.1:1', INFISICAL_CLIENT_ID:'ui-client',
+    INFISICAL_CLIENT_SECRET:'ui-secret-only', INFISICAL_PROJECT_ID:'ui-project',
+    INFISICAL_ENVIRONMENT:'dev', INFISICAL_SECRET_PATH:'/'};
+  for (const [key,value] of Object.entries(values)) { edit(document.getElementById(key), value); await tick(); }
+  await select('Workspace'); await select('Configuration');
+  assert(document.getElementById('INFISICAL_CLIENT_SECRET').value === 'ui-secret-only', 'Navigation lost unsaved configuration');
+  window.receiveNative({ok:false, message:'Cannot save Infisical configuration. Check directory write permissions.'});
+  await tick();
+  assert(document.getElementById('INFISICAL_CLIENT_SECRET').value === 'ui-secret-only', 'Save failure lost draft');
+  document.getElementById('save-configuration').click(); await tick();
+  await waitFor(() => !document.getElementById('INFISICAL_URL').disabled);
+  assert(document.getElementById('save-configuration').disabled, 'Configuration not saved');
+  assert(document.getElementById('INFISICAL_CLIENT_SECRET').value === '', 'Secret echoed after save');
+  assert(document.getElementById('INFISICAL_CLIENT_SECRET').placeholder.includes('Configured'), 'Missing secret state');
+  await select('Workspace'); await select('Configuration');
+  await waitFor(() => !document.getElementById('INFISICAL_URL').disabled);
+  assert(document.getElementById('INFISICAL_PROJECT_ID').value === 'ui-project', 'Saved project not restored');
+  assert(document.getElementById('INFISICAL_CLIENT_SECRET').value === '', 'Saved secret exposed');
+  await select('Background Service');
   await tick();
   assert(document.querySelectorAll('#service-power').length === 1);
   assert(document.querySelector('.service-core'));

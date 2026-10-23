@@ -3,8 +3,10 @@ import os
 import re
 import stat
 import sys
+import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from prbot.paths import data_dir
 
@@ -21,6 +23,116 @@ ENV_KEYS = {
     "INFISICAL_ENVIRONMENT",
     "INFISICAL_SECRET_PATH",
 }
+BOOTSTRAP_DEFAULTS = {
+    "INFISICAL_URL": "https://app.infisical.com",
+    "INFISICAL_ENVIRONMENT": "dev",
+    "INFISICAL_SECRET_PATH": "/",
+}
+
+
+def validate_infisical_url(value):
+    try:
+        url = urlsplit(value)
+        if (
+            url.scheme not in {"http", "https"}
+            or not url.hostname
+            or url.username is not None
+            or url.password is not None
+            or url.query
+            or url.fragment
+            or any(c.isspace() or ord(c) < 32 for c in value)
+        ):
+            raise ValueError
+        url.port  # Reject malformed or out-of-range ports.
+    except (ValueError, TypeError):
+        raise ConfigError(
+            "INFISICAL_URL must be an HTTP(S) URL without credentials, query or fragment."
+        ) from None
+    return value
+
+
+def bootstrap_values(configuration=None):
+    values = {**BOOTSTRAP_DEFAULTS, **read_env(configuration)}
+    values.update({k: v for k, v in os.environ.items() if k.startswith("INFISICAL_")})
+    return values
+
+
+def bootstrap_form(configuration=None):
+    """Expose only non-secret fields and a boolean; never send the saved secret to WebKit."""
+    values = bootstrap_values(configuration)
+    return {
+        "values": {k: values.get(k, "") for k in sorted(ENV_KEYS) if k != "INFISICAL_CLIENT_SECRET"},
+        "client_secret_set": bool(values.get("INFISICAL_CLIENT_SECRET")),
+        "environment_overrides": sorted(k for k in ENV_KEYS if k in os.environ),
+        "path": str(env_path() if configuration is None else configuration),
+    }
+
+
+def save_bootstrap_form(values, expected_path):
+    """Explicit, atomic update of the existing private bootstrap file.
+
+    Blank client secrets retain the file's original value. Environment variables
+    still win at runtime. Unknown keys/comments and the workspace preference stay intact.
+    """
+    path = env_path()
+    if expected_path != str(path):
+        raise ConfigError("Configuration directory changed. Reload Configuration before saving.")
+    if not isinstance(values, dict) or set(values) != ENV_KEYS:
+        raise ConfigError("Provide all six Infisical configuration fields.")
+    cleaned = {}
+    for key, value in values.items():
+        if (
+            not isinstance(value, str)
+            or len(value) > 20000
+            or any(ord(c) < 32 or ord(c) == 127 for c in value)
+            or "\"" in value
+            or "'" in value
+        ):
+            raise ConfigError(key + " must be a single line without quotes or control characters.")
+        cleaned[key] = value.strip()
+    # Validate the persisted file and the effective configuration before touching disk.
+    existing = read_env(path)
+    if not cleaned["INFISICAL_CLIENT_SECRET"]:
+        cleaned["INFISICAL_CLIENT_SECRET"] = existing.get("INFISICAL_CLIENT_SECRET", "")
+    effective = dict(cleaned)
+    effective.update({k: v for k, v in os.environ.items() if k in ENV_KEYS})
+    for key in sorted(ENV_KEYS):
+        if not cleaned[key] and not effective.get(key):
+            raise ConfigError(key + " is required.")
+    for candidate in (cleaned, effective):
+        if candidate["INFISICAL_URL"]:
+            validate_infisical_url(candidate["INFISICAL_URL"])
+        if candidate["INFISICAL_SECRET_PATH"] and not candidate["INFISICAL_SECRET_PATH"].startswith("/"):
+            raise ConfigError("INFISICAL_SECRET_PATH must start with /.")
+    temporary = None
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        original = path.read_text() if path.exists() else None
+        lines = []
+        for line in (original or "").splitlines():
+            key = line.strip().partition("=")[0].strip()
+            if key not in ENV_KEYS:
+                lines.append(line)
+        lines.extend(key + "=" + cleaned[key] for key in sorted(ENV_KEYS))
+        fd, temporary = tempfile.mkstemp(prefix=".prbot-env-", dir=path.parent)
+        with os.fdopen(fd, "w") as out:
+            out.write("\n".join(lines) + "\n")
+            out.flush()
+            os.fsync(out.fileno())
+        # Do not overwrite a workspace switch or an external editor's newer file.
+        if env_path() != path or path.is_symlink() or (
+            (path.read_text() if path.exists() else None) != original
+        ):
+            raise ConfigError("Configuration changed while saving. Reload and retry.")
+        os.replace(temporary, path)
+    except (OSError, UnicodeError):
+        raise ConfigError(
+            "Cannot save Infisical configuration. Check directory write permissions and retry."
+        ) from None
+    finally:
+        if temporary:
+            Path(temporary).unlink(missing_ok=True)
+    return bootstrap_form(path)
 
 
 def workspace_directory():

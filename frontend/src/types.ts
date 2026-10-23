@@ -1,7 +1,16 @@
 export const views = ['Issue', 'Pull Request'] as const;
 export type View = typeof views[number];
 export type Action = 'ready' | 'open_github' | 'refresh_service' | 'choose_workspace' | 'open_configuration' | 'start_service'
-  | 'stop_service' | 'connections' | 'use_id_token' | 'submit_message' | 'history' | 'tasks' | 'retry_save';
+  | 'stop_service' | 'connections' | 'use_id_token' | 'fetch_codex_id_token' | 'configuration' | 'save_configuration'
+  | 'submit_message' | 'history' | 'tasks' | 'retry_save';
+export interface InfisicalFields {
+  INFISICAL_URL: string; INFISICAL_CLIENT_ID: string; INFISICAL_CLIENT_SECRET: string;
+  INFISICAL_PROJECT_ID: string; INFISICAL_ENVIRONMENT: string; INFISICAL_SECRET_PATH: string;
+}
+export interface InfisicalConfiguration {
+  values: Omit<InfisicalFields, 'INFISICAL_CLIENT_SECRET'>;
+  client_secret_set: boolean; environment_overrides: string[]; path: string;
+}
 export interface Draft { link: string; text: string; request_id: string }
 export interface ServiceStatus {
   user?: string; loaded?: boolean; state: string; reported_at?: number; control_verified?: boolean; detail?: string;
@@ -17,10 +26,15 @@ export interface Message {
 export interface NativeResult {
   ok: boolean; message?: string | null; busy?: boolean; status?: ServiceStatus;
   connections?: { id_token: string; infisical: string; project: string };
+  id_token_result?: { token: string; applied: boolean };
+  configuration?: InfisicalConfiguration;
   accepted?: Task; tasks?: Task[];
   history?: { mode: View; cursor: string; messages: Message[] };
 }
-export interface RequestData { text?: string; mode?: View; link?: string; request_id?: string; cursor?: string }
+export interface RequestData {
+  text?: string; mode?: View; link?: string; request_id?: string; cursor?: string;
+  configuration?: InfisicalFields; configuration_path?: string;
+}
 export type SendAction = (action: Action, data?: RequestData) => void;
 declare global {
   interface Window {

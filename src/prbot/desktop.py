@@ -16,6 +16,55 @@ def asset_directory():
     return Path(__file__).resolve().parents[2] / "frontend/dist"
 
 
+SETTINGS_ACTIONS = {
+    "connections", "use_id_token", "fetch_codex_id_token", "configuration", "save_configuration"
+}
+
+
+def settings_request(action, request):
+    """Settings operations shared by the validated native bridge and remote tests."""
+    from prbot.config import bootstrap_form, save_bootstrap_form
+    from prbot.execution_setup import codex_login, fetch_codex_id_token
+    from prbot.secrets import bootstrap, clear_cache, load_secrets
+
+    if action == "fetch_codex_id_token":
+        return "ID token fetched. Choose Use token to apply it in this window.", {
+            "id_token_result": {"token": fetch_codex_id_token(), "applied": False}
+        }
+    if action == "use_id_token":
+        token = request.get("text")
+        if not isinstance(token, str) or not token.strip():
+            raise ConfigError("Enter a Codex ID token before choosing Use token.")
+        auth = json.loads(codex_login(token))
+        return "ID token applied in this window only.", {
+            "id_token_result": {"token": auth["tokens"]["id_token"], "applied": True}
+        }
+    if action == "configuration":
+        return "Configuration loaded. Changes are saved only when you choose Save configuration.", {
+            "configuration": bootstrap_form()
+        }
+    if action == "save_configuration":
+        form = save_bootstrap_form(request.get("configuration"), request.get("configuration_path"))
+        clear_cache()
+        return (
+            "Configuration saved. Restart PRBot to apply it to all services. "
+            "Process environment variables keep priority.",
+            {"configuration": form},
+        )
+    if action == "connections":
+        auth = codex_login()
+        load_secrets(refresh=True)
+        cfg = bootstrap()
+        return "Connections refreshed. ID token changes apply in this window only.", {
+            "connections": {
+                "id_token": json.loads(auth)["tokens"]["id_token"],
+                "infisical": "Connected",
+                "project": cfg["INFISICAL_PROJECT_ID"],
+            }
+        }
+    raise ConfigError("Unsupported settings request.")
+
+
 def show(check_output=None):
     # These imports are intentionally lazy: daemon and CLI never start AppKit/WebKit.
     import AppKit
@@ -26,8 +75,6 @@ def show(check_output=None):
 
     from prbot import service
     from prbot.conversation_service import ConversationService
-    from prbot.execution_setup import codex_login
-    from prbot.secrets import load_secrets
     from prbot.ui import ACTIONS, perform_action
 
     # Separate event loop owns the task runner; no model/network operation blocks AppKit.
@@ -122,14 +169,12 @@ def show(check_output=None):
             if self.web.URL() is None or self.web.URL().path() != str(self.page):
                 return
             body = message.body()
-            allowed = ACTIONS | {
+            allowed = ACTIONS | SETTINGS_ACTIONS | {
                 "ready",
                 "open_github",
                 "refresh_service",
                 "submit_message",
                 "history",
-                "connections",
-                "use_id_token",
                 "retry_save",
                 "tasks",
             }
@@ -170,23 +215,8 @@ def show(check_output=None):
                         return
                     if action in ACTIONS:
                         feedback = perform_action(action)
-                    elif action in {"connections", "use_id_token"}:
-                        from prbot.secrets import bootstrap
-
-                        if action == "use_id_token":
-                            auth = codex_login(request.get("text"))
-                        else:
-                            auth = codex_login()
-                        load_secrets(refresh=True)
-                        cfg = bootstrap()
-                        extra["connections"] = {
-                            "id_token": json.loads(auth)["tokens"]["id_token"],
-                            "infisical": "Connected",
-                            "project": cfg["INFISICAL_PROJECT_ID"],
-                        }
-                        feedback = (
-                            "Connections refreshed. ID token changes apply in this window only."
-                        )
+                    elif action in SETTINGS_ACTIONS:
+                        feedback, extra = settings_request(action, request)
                     else:
                         app_service = ConversationService()
                         actor = "local:" + getpass.getuser()

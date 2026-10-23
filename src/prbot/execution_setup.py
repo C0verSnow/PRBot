@@ -1,6 +1,8 @@
 """Read the user's Codex login; temporary edits live only in this process."""
 
+import base64
 import json
+import re
 import threading
 from pathlib import Path
 
@@ -9,6 +11,51 @@ from prbot.config import ConfigError
 _lock = threading.Lock()
 _override = None
 _session_auth = None
+
+
+def fetch_codex_id_token():
+    """Read only the native ID token, ignoring PRBot's in-memory authentication edits.
+
+    This is structural validation, not signature or account verification. Never
+    invoke the SDK, refresh credentials, or persist the returned value here.
+    """
+    path = Path.home() / ".codex/auth.json"
+    try:
+        content = path.read_text()
+    except FileNotFoundError:
+        raise ConfigError(
+            "Codex credentials file is missing. Sign in with Codex on this Mac, then retry."
+        ) from None
+    except (OSError, UnicodeError):
+        raise ConfigError(
+            "Cannot read Codex credentials. Check auth.json read permissions and retry."
+        ) from None
+    try:
+        auth = json.loads(content)
+        tokens = auth.get("tokens") if isinstance(auth, dict) else None
+        token = tokens.get("id_token") if isinstance(tokens, dict) else None
+        if not isinstance(token, str) or not token.strip() or len(token) > 20000:
+            raise ValueError
+        token = token.strip()
+        if not re.fullmatch(r"[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+", token):
+            raise ValueError
+        header, payload, _signature = token.split(".")
+        header = json.loads(base64.urlsafe_b64decode(header + "=" * (-len(header) % 4)))
+        payload = json.loads(base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4)))
+        if (
+            not isinstance(header, dict)
+            or header.get("alg") not in {"RS256", "ES256"}
+            or not isinstance(payload, dict)
+            or not isinstance(payload.get("sub"), str)
+            or not payload["sub"]
+        ):
+            raise ValueError
+        return token
+    except (ValueError, TypeError, UnicodeError):
+        raise ConfigError(
+            "Codex credentials do not contain a valid tokens.id_token. "
+            "An access token or API key cannot replace an ID token. Check your Codex sign-in."
+        ) from None
 
 
 def codex_login(id_token=None):

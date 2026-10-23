@@ -1,12 +1,11 @@
 """Infisical is the only source of operational settings and secrets."""
 
-import os
 import time
 from threading import Lock
 
 import httpx
 
-from prbot.config import ConfigError, read_env
+from prbot.config import ConfigError, bootstrap_values, validate_infisical_url
 
 _lock = Lock()
 _cache = None
@@ -15,15 +14,14 @@ _cache_key = None
 
 
 def bootstrap(configuration=None):
-    values = read_env() if configuration is None else read_env(configuration)
-    values.update({k: v for k, v in os.environ.items() if k.startswith("INFISICAL_")})
+    values = bootstrap_values(configuration)
     required = ("INFISICAL_CLIENT_ID", "INFISICAL_CLIENT_SECRET", "INFISICAL_PROJECT_ID")
     missing = [key for key in required if not values.get(key)]
     if missing:
         raise ConfigError(
             "Missing Infisical connection settings: "
             + ", ".join(missing)
-            + ". Open the configuration directory and edit .env."
+            + ". Open Settings > Configuration or edit .env in the configuration directory."
         )
     return values
 
@@ -41,8 +39,7 @@ def load_secrets(refresh=False, configuration=None):
         ):
             return dict(_cache)
         url = settings.get("INFISICAL_URL", "https://app.infisical.com").rstrip("/")
-        if not url.startswith("https://"):
-            raise ConfigError("INFISICAL_URL must use HTTPS.")
+        validate_infisical_url(url)
         try:
             with httpx.Client(base_url=url, timeout=20, follow_redirects=False) as client:
                 response = client.post(

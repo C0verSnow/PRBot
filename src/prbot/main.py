@@ -113,7 +113,12 @@ def main():
             if os.environ.get("CI") != "true" or not os.environ.get("PRBOT_UI_CHECK_OUTPUT"):
                 raise ConfigError("UI checks are only allowed in remote CI.")
             output = Path(os.environ["PRBOT_UI_CHECK_OUTPUT"])
-            show(check_output=output)
+            # UI acceptance uses only synthetic credentials and a disposable home.
+            import tempfile
+
+            with tempfile.TemporaryDirectory(prefix="prbot-ui-") as test_home:
+                os.environ["HOME"] = test_home
+                show(check_output=output)
             if not json.loads(output.with_suffix(".json").read_text()).get("ok"):
                 raise ConfigError("Packaged UI check failed. Inspect remote artifacts.")
         elif args.command == "ui":
