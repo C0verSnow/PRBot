@@ -25,7 +25,7 @@ _stage = "dependencies"
 
 
 def emit(event):
-    sys.stdout.write(json.dumps(event, ensure_ascii=True) + "\n")
+    sys.stdout.write(json.dumps({"v": 1, **event}, ensure_ascii=True) + "\n")
     sys.stdout.flush()
 
 

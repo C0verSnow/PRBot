@@ -29,7 +29,7 @@ export interface NativeResult {
   connections?: { id_token: string; infisical: string; project: string };
   id_token_result?: { token: string; applied: boolean };
   configuration?: InfisicalConfiguration;
-  accepted?: Task; tasks?: Task[];
+  accepted?: Task; tasks?: Task[]; tasks_revision?: number;
   history?: { mode: View; cursor: string; messages: Message[] };
 }
 export interface RequestData {

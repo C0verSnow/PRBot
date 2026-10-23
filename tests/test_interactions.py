@@ -159,3 +159,70 @@ def test_worker_commentary_filter_includes_short_sensitive_values(monkeypatch):
     monkeypatch.setenv("EXAMPLE_PASSWORD", "tiny")
     assert "tiny" not in safe_text("value=tiny Bearer abcdefgh", {"auth": "{}"})
     assert "abcdefgh" not in safe_text("value=tiny Bearer abcdefgh", {"auth": "{}"})
+
+
+def test_worker_streams_safe_commentary_and_omits_tool_output(tmp_path, monkeypatch, capsys):
+    import io
+    import sys
+    from types import SimpleNamespace as NS
+
+    from prbot import sdk_worker
+
+    runtime = tmp_path / "codex"
+    runtime.touch(mode=0o700)
+    response = {"summary": "Done", "outcome": "completed", "validation": "", "pr_url": ""}
+    events = [
+        NS(method="item/started", payload=NS()),
+        NS(
+            method="item/completed",
+            payload=NS(item=NS(type="commandExecution", aggregated_output="RAW-TOOL-SECRET")),
+        ),
+        NS(
+            method="item/completed",
+            payload=NS(
+                item=NS(
+                    type="agentMessage",
+                    phase="commentary",
+                    text="Reviewing Bearer top-secret-token",
+                )
+            ),
+        ),
+        NS(
+            method="item/completed",
+            payload=NS(
+                item=NS(type="agentMessage", phase="final_answer", text=json.dumps(response))
+            ),
+        ),
+        NS(method="turn/completed", payload=NS(turn=NS(status=NS(value="completed")))),
+    ]
+    client = Mock()
+    client.account.return_value = NS(account=object())
+    client.thread_start.return_value.turn.return_value.stream.return_value = iter(events)
+    sdk = Mock()
+    sdk.Codex.return_value.__enter__ = Mock(return_value=client)
+    sdk.Codex.return_value.__exit__ = Mock(return_value=False)
+    monkeypatch.setitem(sys.modules, "openai_codex", sdk)
+    monkeypatch.setitem(sys.modules, "codex_cli_bin", Mock(bundled_codex_path=lambda: runtime))
+    monkeypatch.setattr(
+        sys,
+        "stdin",
+        io.StringIO(
+            json.dumps(
+                {
+                    "path": str(tmp_path),
+                    "auth": "{}",
+                    "prompt": '{"task":{"kind":"chat"}}',
+                    "schema": {},
+                }
+            )
+            + "\n"
+        ),
+    )
+    sdk_worker.run()
+    output = capsys.readouterr().out
+    assert "RAW-TOOL-SECRET" not in output and "top-secret-token" not in output
+    envelopes = [json.loads(line) for line in output.splitlines()]
+    assert [event["type"] for event in envelopes] == ["progress", "text", "result"]
+    assert all(event["v"] == 1 for event in envelopes)
+    assert envelopes[-1]["result"] == response
+    assert client.thread_start.call_args.kwargs["sandbox"] == sdk.Sandbox.read_only

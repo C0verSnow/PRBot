@@ -24,6 +24,7 @@ export function App() {
     const task = result.accepted;
     if (task) {
       setCurrent(previous => previous[task.mode] === task.id ? previous : ({ ...previous, [task.mode]: task.id }));
+      if (task.mode === 'Chat History') { setHistoryMode('Chat History'); setSession(task.id); }
       if (task.id !== accepted.current) {
         accepted.current = task.id;
         setDrafts(previous => previous[task.mode].request_id === task.id ? { ...previous, [task.mode]: fresh() } : previous);

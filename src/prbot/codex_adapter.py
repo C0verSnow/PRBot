@@ -174,6 +174,8 @@ class CodexAdapter:
                         out = b""
                         while line := await proc.stdout.readline():
                             event = json.loads(line)
+                            if event.get("v", 1) != 1:
+                                raise ValueError
                             if event.get("type") in {"progress", "text"}:
                                 await self.on_event(event)
                             else:

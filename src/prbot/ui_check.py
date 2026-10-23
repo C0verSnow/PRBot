@@ -179,6 +179,16 @@ true;
         if not result or error:
             AppHelper.callLater(0.25, poll)
             return
+        def home_snapshot(image, snapshot_error):
+            if snapshot_error or image is None:
+                return
+            bitmap = AppKit.NSBitmapImageRep.imageRepWithData_(image.TIFFRepresentation())
+            data = bitmap.representationUsingType_properties_(AppKit.NSBitmapImageFileTypePNG, {})
+            data.writeToFile_atomically_(str(output.with_name(output.stem + "-home.png")), True)
+
+        web.takeSnapshotWithConfiguration_completionHandler_(
+            WebKit.WKSnapshotConfiguration.alloc().init(), home_snapshot
+        )
         # Native ready/status bridge has completed. Await React's updates after user events.
         web.evaluateJavaScript_completionHandler_(
             """
@@ -468,6 +478,41 @@ true;
     'Missing independent Chat History');
   assert(!field('target-link'), 'Private chat requires a GitHub link');
   document.querySelector('[data-view="Issue"]').click(); await tick();
+  field('user').focus();
+  // Keep a deterministic fixture visible for scroll, answer-routing and screenshot evidence.
+  const routed = [];
+  handler.postMessage = body => routed.push(body);
+  const fixtureTask = {id:'ui-waiting-task',conversation_id:'ui',mode:'Issue',
+    status:'needs_clarification',created_at:1,
+    result:JSON.stringify({summary:'Which branch should I use?',outcome:'needs_clarification',
+      pr_url:'',validation:'Waiting for your answer'}),
+    events:Array.from({length:35},(_,index) => ({sequence:index,kind:'text',created:index+1,
+      text:'Reviewed repository context · step ' + index}))};
+  window.receiveNative({ok:true,tasks:[JSON.parse(JSON.stringify(fixtureTask))],tasks_revision:999999999}); await tick();
+  const feed = document.querySelector('.execution-feed');
+  feed.scrollTop = 0; feed.dispatchEvent(new Event('scroll')); await tick();
+  field('draft').focus();
+  const draftValue = field('draft').value;
+  fixtureTask.events.push({sequence:36,kind:'text',created:36,text:'Ready for your answer.'});
+  window.receiveNative({ok:true,tasks:[JSON.parse(JSON.stringify(fixtureTask))],tasks_revision:999999999}); await tick();
+  assert(feed.scrollTop === 0, 'New feedback interrupted historical reading');
+  assert(document.activeElement === field('draft') && field('draft').value === draftValue,
+    'Feedback changed composer focus or text');
+  feed.scrollTop = feed.scrollHeight; feed.dispatchEvent(new Event('scroll')); await tick();
+  fixtureTask.events.push({sequence:37,kind:'text',created:37,text:'Task safely paused.'});
+  window.receiveNative({ok:true,tasks:[JSON.parse(JSON.stringify(fixtureTask))],tasks_revision:999999999}); await tick();
+  assert(feed.scrollHeight - feed.scrollTop - feed.clientHeight < 2,
+    'Feedback did not follow near the bottom');
+  edit(field('answer-ui-waiting-task'), 'Use feature/ui'); await tick();
+  const answerForm = field('answer-ui-waiting-task').closest('form');
+  answerForm.requestSubmit(); await tick();
+  const reply = routed.find(body => body.action === 'answer');
+  assert(reply && reply.task_id === fixtureTask.id && reply.text === 'Use feature/ui',
+    'Answer was submitted as an unrelated new task');
+  window.receiveNative({ok:false,completed_action:'answer',bridge_id:reply.bridge_id,
+    message:'Fixture: waiting for your answer'}); await tick();
+  assert(field('answer-ui-waiting-task').value === 'Use feature/ui', 'Failed reply lost draft');
+  document.querySelector('main').scrollTop = document.querySelector('main').scrollHeight;
   field('user').focus();
   assert(document.activeElement.id === 'user', 'Dialog did not restore focus');
   assert(!/[\u4e00-\u9fff]/.test(document.body.innerText), 'Non-English product copy');
