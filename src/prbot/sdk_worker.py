@@ -115,7 +115,13 @@ def _run():
             if codex.account().account is None:
                 raise RuntimeError("Codex login required")
             _stage = "turn"
-            private_chat = json.loads(request["prompt"]).get("task", {}).get("kind") == "chat"
+            try:
+                task_prompt = json.loads(request["prompt"])
+            except (ValueError, TypeError):
+                task_prompt = {}
+            private_chat = (
+                isinstance(task_prompt, dict) and task_prompt.get("task", {}).get("kind") == "chat"
+            )
             thread = codex.thread_start(
                 cwd=str(workspace),
                 ephemeral=True,
@@ -149,6 +155,8 @@ def _run():
             if not completed or not final_response:
                 raise RuntimeError("Codex turn did not complete")
             result = json.loads(final_response)
+            if result.get("outcome") == "needs_clarification":
+                emit({"type": "interaction", "text": safe_text(result.get("summary", ""), request)})
             emit({"type": "result", "result": result, "auth": auth.read_text()})
 
 

@@ -311,9 +311,14 @@ class ConversationService:
             self.archive = ConversationStore(self.values)
 
     async def save_result(self, row):
+        with self.db() as db:
+            round_number = db.execute(
+                "SELECT COUNT(*) FROM replies WHERE task_id=?", (row["id"],)
+            ).fetchone()[0]
+        suffix = ":" + str(round_number) if round_number else ""
         message = {
             "conversation_id": row["conversation"],
-            "message_id": row["id"] + ":assistant:" + str(row["changed"]),
+            "message_id": row["id"] + ":assistant" + suffix,
             "source": row["source"],
             "actor_id": row["actor"],
             "role": "assistant",

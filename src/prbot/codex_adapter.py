@@ -176,7 +176,7 @@ class CodexAdapter:
                             event = json.loads(line)
                             if event.get("v", 1) != 1:
                                 raise ValueError
-                            if event.get("type") in {"progress", "text"}:
+                            if event.get("type") in {"progress", "text", "interaction"}:
                                 await self.on_event(event)
                             else:
                                 out = line
