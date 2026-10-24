@@ -22,18 +22,43 @@ def private_home(request):
 
 
 _stage = "dependencies"
+_runtime_path = None
+_workspace_path = None
+
+
+def emit(event):
+    sys.stdout.write(json.dumps({"v": 1, **event}, ensure_ascii=True) + "\n")
+    sys.stdout.flush()
+
+
+def safe_text(text, request):
+    from prbot.conversation_service import redact
+
+    auth = json.loads(request["auth"])
+    secrets = [
+        value
+        for key, value in os.environ.items()
+        if any(word in key.upper() for word in ("TOKEN", "SECRET", "PASSWORD", "KEY"))
+    ]
+    secrets += list(auth.get("tokens", {}).values())
+    for secret in secrets:
+        if isinstance(secret, str) and secret:
+            text = text.replace(secret, "[REDACTED]")
+    return redact(text, secrets)[:8000]
 
 
 def _run():
-    global _stage
+    global _stage, _runtime_path, _workspace_path
     from codex_cli_bin import bundled_codex_path
     from openai_codex import ApprovalMode, Codex, CodexConfig, Sandbox
 
     _stage = "request"
-    request = json.load(sys.stdin)
+    request = json.loads(sys.stdin.readline())
     workspace = Path(request["path"]).resolve()
+    _workspace_path = str(workspace)
     _stage = "runtime"
     runtime = str(bundled_codex_path().resolve())
+    _runtime_path = runtime
     if not os.access(runtime, os.X_OK):
         raise PermissionError("Runtime unavailable")
     with private_home(request) as private:
@@ -94,21 +119,64 @@ def _run():
             if codex.account().account is None:
                 raise RuntimeError("Codex login required")
             _stage = "turn"
+            try:
+                task_prompt = json.loads(request["prompt"])
+            except (ValueError, TypeError):
+                task_prompt = {}
+            private_chat = (
+                isinstance(task_prompt, dict) and task_prompt.get("task", {}).get("kind") == "chat"
+            )
             thread = codex.thread_start(
                 cwd=str(workspace),
                 ephemeral=True,
-                sandbox=Sandbox.full_access,
+                sandbox=Sandbox.read_only if private_chat else Sandbox.full_access,
                 approval_mode=ApprovalMode.deny_all,
                 developer_instructions="Follow applicable AGENTS.md. Use host tools as needed. "
-                "Never run local builds or compilation tests. Return the supplied JSON schema.",
+                "Never run local builds or compilation tests. Return the supplied JSON schema. "
+                "If information or user confirmation is needed, stop safely and return "
+                "outcome=needs_clarification with a clear question in summary. "
+                "Do not use request_user_input. Never publish private chat to GitHub.",
             )
-            result = thread.run(request["prompt"], output_schema=request["schema"])
-            if str(result.status.value) != "completed" or not result.final_response:
+            turn = thread.turn(request["prompt"], output_schema=request["schema"])
+            final_response = None
+            questions = []
+            completed = False
+            for event in turn.stream():
+                # Do not forward raw RPC payloads, commands, reasoning or tool output.
+                if event.method == "item/started":
+                    emit({"type": "progress", "text": "Codex is working on the task."})
+                elif event.method == "item/completed":
+                    item = event.payload.item
+                    item = item.root if hasattr(item, "root") else item
+                    if getattr(item, "type", None) == "agentMessage":
+                        for question in getattr(item, "questions", None) or []:
+                            title = question.title
+                            if question.options:
+                                title += "\nOptions: " + "; ".join(question.options)
+                            questions.append(title)
+                        phase = getattr(item, "phase", None)
+                        phase = getattr(phase, "value", phase)
+                        if phase in {None, "final_answer"}:
+                            final_response = item.text
+                        elif phase == "commentary":
+                            emit({"type": "text", "text": safe_text(item.text, request)})
+                elif event.method == "turn/completed":
+                    completed = event.payload.turn.status.value == "completed"
+            if not completed or (not final_response and not questions):
                 raise RuntimeError("Codex turn did not complete")
-            json.loads(result.final_response)
-            sys.stdout.write(
-                json.dumps({"result": json.loads(result.final_response), "auth": auth.read_text()})
+            result = (
+                {
+                    "outcome": "needs_clarification",
+                    "summary": "\n\n".join(questions),
+                    "pr_url": "",
+                    "validation": "Waiting for your answer",
+                }
+                if questions
+                else json.loads(final_response)
             )
+            if result.get("outcome") == "needs_clarification":
+                emit({"type": "interaction", "text": safe_text(result.get("summary", ""), request)})
+            emit({"type": "result", "result": result, "auth": auth.read_text()})
 
 
 def run():
@@ -158,7 +226,27 @@ def run():
             kind = "timeout"
         elif "connection" in message or "network" in message:
             kind = "network"
-        sys.stdout.write(json.dumps({"error": {"stage": _stage, "type": name, "kind": kind}}))
+        metadata = {"stage": _stage, "type": name, "kind": kind}
+        if isinstance(error, FileNotFoundError):
+            metadata["file_target"] = (
+                "unspecified"
+                if error.filename is None
+                else "runtime"
+                if error.filename == _runtime_path
+                else "workspace"
+                if error.filename == _workspace_path
+                else "other"
+            )
+            metadata["origin"] = "other"
+            trace = error.__traceback__
+            while trace:
+                module = trace.tb_frame.f_globals.get("__name__")
+                if module == "subprocess":
+                    metadata["origin"] = "process_launch"
+                elif module == "openai_codex.client":
+                    metadata["origin"] = "sdk_client"
+                trace = trace.tb_next
+        sys.stdout.write(json.dumps({"error": metadata}))
         raise SystemExit(1) from None
 
 

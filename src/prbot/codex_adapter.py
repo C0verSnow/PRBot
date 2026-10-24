@@ -38,7 +38,7 @@ class SDKFailure(DeliveryError):
 
 def worker_failure(output):
     try:
-        error = json.loads(output)["error"]
+        error = json.loads(output.splitlines()[-1])["error"]
         stage = error["stage"]
         kind = error["kind"]
         name = error["type"]
@@ -81,8 +81,15 @@ def worker_failure(output):
         code = kind if kind != "failure" else stage
         if code not in {"dependencies", "runtime", "auth", "initialize"} and kind == "failure":
             code = "failure"
-        return SDKFailure(code, stage, name)
-    except (ValueError, TypeError, KeyError):
+        failure = SDKFailure(code, stage, name)
+        failure.file_target = error.get("file_target", "unspecified")
+        failure.origin = error.get("origin", "other")
+        if failure.file_target not in {"runtime", "workspace", "other", "unspecified"}:
+            failure.file_target = "other"
+        if failure.origin not in {"process_launch", "sdk_client", "other"}:
+            failure.origin = "other"
+        return failure
+    except (ValueError, TypeError, KeyError, IndexError):
         return SDKFailure("failure", "worker", "ProcessExit")
 
 
@@ -102,9 +109,10 @@ def parent_rules(path):
 
 
 class CodexAdapter:
-    def __init__(self, auth, environment=None):
+    def __init__(self, auth, environment=None, on_event=None):
         self.auth = auth
         self.environment = environment or {}
+        self.on_event = on_event
 
     async def invoke(self, path, prompt, schema, timeout):
         # The parent owns cleanup even when cancellation must SIGKILL the worker.
@@ -144,7 +152,7 @@ class CodexAdapter:
             raise SDKFailure("launch", "controller", type(error).__name__) from None
         try:
             async with asyncio.timeout(timeout):
-                out, diagnostic = await proc.communicate(
+                request = (
                     json.dumps(
                         {
                             "auth": original_auth,
@@ -154,10 +162,38 @@ class CodexAdapter:
                             "schema": schema,
                         }
                     ).encode()
+                    + b"\n"
                 )
+                if self.on_event is None:
+                    out, _ = await proc.communicate(request)
+                else:
+                    proc.stdin.write(request)
+                    await proc.stdin.drain()
+                    proc.stdin.close()
+
+                    # Drain stderr without retaining potentially sensitive diagnostics.
+                    async def discard():
+                        while await proc.stderr.read(8192):
+                            pass
+
+                    drain = asyncio.create_task(discard())
+                    try:
+                        out = b""
+                        while line := await proc.stdout.readline():
+                            event = json.loads(line)
+                            if event.get("v", 1) != 1:
+                                raise ValueError
+                            if event.get("type") in {"progress", "text", "interaction"}:
+                                await self.on_event(event)
+                            else:
+                                out = line
+                        await proc.wait()
+                    finally:
+                        drain.cancel()
+                        await asyncio.gather(drain, return_exceptions=True)
             if proc.returncode:
                 raise worker_failure(out)
-            response = json.loads(out)
+            response = json.loads(out.splitlines()[-1])
             if prompt == "__prbot_runtime_check__":
                 return response
             if not isinstance(response, dict) or not isinstance(response.get("result"), dict):

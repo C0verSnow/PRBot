@@ -142,6 +142,44 @@ def test_real_sdk_transport_exception_type_survives_safe_boundary(monkeypatch, c
     assert "secret-token" not in captured.out + str(failure)
 
 
+def test_missing_runtime_diagnostic_never_exposes_filename(monkeypatch, capsys):
+    from prbot import sdk_worker
+
+    private = "/private/secret-token/codex"
+
+    def fail():
+        sdk_worker._stage = "initialize"
+        raise FileNotFoundError(2, "user@example.com", private)
+
+    monkeypatch.setattr(sdk_worker, "_run", fail)
+    monkeypatch.setattr(sdk_worker, "_runtime_path", private)
+    with pytest.raises(SystemExit):
+        sdk_worker.run()
+    captured = capsys.readouterr()
+    failure = worker_failure(captured.out)
+    assert failure.file_target == "runtime"
+    assert failure.origin == "other"
+    assert "secret-token" not in captured.out and "user@example.com" not in captured.out
+
+
+def test_untrusted_file_diagnostic_is_reduced_to_safe_category():
+    failure = worker_failure(
+        json.dumps(
+            {
+                "error": {
+                    "stage": "initialize",
+                    "type": "FileNotFoundError",
+                    "kind": "failure",
+                    "file_target": "secret-token",
+                    "origin": "secret-token",
+                }
+            }
+        )
+    )
+    assert failure.file_target == failure.origin == "other"
+    assert "secret-token" not in str(failure)
+
+
 async def test_real_full_access_runtime_initializes_without_credentials(tmp_path):
     result = await CodexAdapter("{}").invoke(tmp_path, "__prbot_runtime_check__", {}, 30)
     assert result == {"initialized": True, "thread_started": True}

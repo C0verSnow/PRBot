@@ -149,10 +149,19 @@ def show(check_output=None):
     class Bridge(NSObject):
         busy = False
         control_verified_at = 0
+        cached_status = {"state": "unknown"}
 
         @objc.python_method
         def deliver(self, message=None, ok=True, extra=None):
             payload = {"message": message, "ok": ok, "busy": self.busy}
+            payload["status"] = self.cached_status
+            payload.update(extra or {})
+            self.web.evaluateJavaScript_completionHandler_(
+                "window.receiveNative(" + json.dumps(payload, ensure_ascii=True) + ")", None
+            )
+
+        @objc.python_method
+        def read_status(self):
             try:
                 state = service.status()
                 report = state.get("last_service_report", {})
@@ -164,7 +173,7 @@ def show(check_output=None):
                     health = "stopped"
                 if loaded and time.time() - report.get("time", 0) > 15:
                     health = "stale"
-                payload["status"] = {
+                status = {
                     "user": getpass.getuser(),
                     "loaded": loaded,
                     "state": health,
@@ -175,11 +184,8 @@ def show(check_output=None):
                     "configuration": str(env_path().parent),
                 }
             except Exception:
-                payload["status"] = {"state": "unavailable"}
-            payload.update(extra or {})
-            self.web.evaluateJavaScript_completionHandler_(
-                "window.receiveNative(" + json.dumps(payload, ensure_ascii=True) + ")", None
-            )
+                status = {"state": "unavailable"}
+            return status
 
         def userContentController_didReceiveScriptMessage_(self, controller, message):
             if not message.frameInfo().isMainFrame():
@@ -195,6 +201,7 @@ def show(check_output=None):
                     "open_github",
                     "refresh_service",
                     "submit_message",
+                    "answer",
                     "history",
                     "retry_save",
                     "tasks",
@@ -208,20 +215,20 @@ def show(check_output=None):
                 self.deliver("Unsupported request.", False)
                 return
             action = body.get("action")
-            if action == "refresh_service":
-                import time
-
-                self.control_verified_at = time.time()
-                self.deliver("Service process status verified.", extra={"completed_action": action})
+            background_action = action in {
+                "ready",
+                "tasks",
+                "history",
+                "connections",
+                "configuration",
+            }
+            if action in self.inflight:
                 return
-            if action == "ready":
-                self.deliver()
-                return
-            if self.busy:
+            if self.busy and not background_action:
                 self.deliver(
                     "An operation is still in progress. Please wait.",
                     False,
-                    {"completed_action": action},
+                    {"completed_action": action, "bridge_id": body.get("bridge_id")},
                 )
                 return
             # JSON round trip prevents retaining PyObjC objects on a worker thread.
@@ -230,8 +237,18 @@ def show(check_output=None):
             except ConfigError as error:
                 self.deliver(str(error), False, {"completed_action": action})
                 return
-            self.active_action = action
-            self.busy = True
+            self.inflight.add(action)
+            if not background_action:
+                self.busy = True
+            bridge_id = request.get("bridge_id")
+
+            def finish(feedback, ok, extra):
+                self.inflight.discard(action)
+                if not background_action:
+                    self.busy = False
+                self.deliver(
+                    feedback, ok, {**extra, "completed_action": action, "bridge_id": bridge_id}
+                )
 
             def work():
                 try:
@@ -242,9 +259,24 @@ def show(check_output=None):
 
                         link = request.get("text")
                         target_link(link, "Pull Request")
-                        AppHelper.callAfter(self.open_github, link)
+                        opened = AppKit.NSWorkspace.sharedWorkspace().openURL_(
+                            NSURL.URLWithString_(link)
+                        )
+                        feedback = (
+                            "Pull request opened." if opened else "Could not open pull request."
+                        )
+                        AppHelper.callAfter(finish, feedback, bool(opened), {})
                         return
-                    if action in ACTIONS:
+                    if action in {"ready", "refresh_service"}:
+                        import time
+
+                        if action == "refresh_service":
+                            self.control_verified_at = time.time()
+                            feedback = "Service process status verified."
+                        status = self.read_status()
+                        AppHelper.callAfter(setattr, self, "cached_status", status)
+                        extra["status"] = status
+                    elif action in ACTIONS:
                         feedback = perform_action(action)
                     elif action in SETTINGS_ACTIONS:
                         feedback, extra = settings_request(action, request)
@@ -264,12 +296,23 @@ def show(check_output=None):
                             )
                             extra["accepted"] = task
                             feedback = "Task accepted."
+                        elif action == "answer":
+                            extra["accepted"] = asyncio.run(
+                                app_service.answer(
+                                    request.get("task_id"),
+                                    request.get("request_id"),
+                                    actor,
+                                    "desktop",
+                                    request.get("text"),
+                                )
+                            )
+                            feedback = "Answer accepted. Continuing the original task."
                         elif action == "retry_save":
                             asyncio.run(app_service.retry_save(request.get("text"), actor))
                             feedback = "Message saved."
                         elif action == "history":
                             mode = request.get("mode")
-                            if mode not in {"Issue", "Pull Request"}:
+                            if mode not in {"Issue", "Pull Request", "Chat History"}:
                                 raise ConfigError("Choose a task mode.")
                             cid = app_service.conversation(actor, "desktop", mode)
                             extra["history"] = dict(
@@ -278,31 +321,19 @@ def show(check_output=None):
                                 ),
                                 mode=mode,
                             )
+                        import time
+
+                        extra["tasks_revision"] = time.monotonic()
                         extra["tasks"] = app_service.tasks(actor)
-                    AppHelper.callAfter(self.finish, feedback, True, extra)
+                    AppHelper.callAfter(finish, feedback, True, extra)
                 except ConfigError as error:
-                    AppHelper.callAfter(self.finish, str(error), False, {})
+                    AppHelper.callAfter(finish, str(error), False, {})
                 except Exception:
                     AppHelper.callAfter(
-                        self.finish, "Operation failed. Check connections and retry.", False, {}
+                        finish, "Operation failed. Check connections and retry.", False, {}
                     )
 
             Thread(target=work, daemon=True).start()
-
-        @objc.python_method
-        def open_github(self, link):
-            opened = AppKit.NSWorkspace.sharedWorkspace().openURL_(NSURL.URLWithString_(link))
-            self.finish(
-                "Pull request opened." if opened else "Could not open the pull request.",
-                bool(opened),
-                {},
-            )
-
-        @objc.python_method
-        def finish(self, message, ok, extra):
-            self.busy = False
-            self.deliver(message, ok, {**extra, "completed_action": self.active_action})
-            self.active_action = None
 
         @objc.typedSelector(b"v@:@@@?")
         def webView_decidePolicyForNavigationAction_decisionHandler_(
@@ -317,6 +348,26 @@ def show(check_output=None):
             )
 
     app = AppKit.NSApplication.sharedApplication()
+    # WKWebView relies on the responder chain's standard Edit menu for Cmd+C/V/X/A.
+    menu = AppKit.NSMenu.alloc().init()
+    application_item = AppKit.NSMenuItem.alloc().init()
+    menu.addItem_(application_item)
+    application_menu = AppKit.NSMenu.alloc().initWithTitle_("PRBot")
+    application_item.setSubmenu_(application_menu)
+    application_menu.addItemWithTitle_action_keyEquivalent_("Quit PRBot", "terminate:", "q")
+    edit_item = AppKit.NSMenuItem.alloc().init()
+    menu.addItem_(edit_item)
+    edit = AppKit.NSMenu.alloc().initWithTitle_("Edit")
+    edit_item.setSubmenu_(edit)
+    for title, selector, key in (
+        ("Undo", "undo:", "z"),
+        ("Cut", "cut:", "x"),
+        ("Copy", "copy:", "c"),
+        ("Paste", "paste:", "v"),
+        ("Select All", "selectAll:", "a"),
+    ):
+        edit.addItemWithTitle_action_keyEquivalent_(title, selector, key)
+    app.setMainMenu_(menu)
     app.setActivationPolicy_(AppKit.NSApplicationActivationPolicyRegular)
     style = (
         AppKit.NSWindowStyleMaskTitled
@@ -333,6 +384,7 @@ def show(check_output=None):
     delegate = WindowDelegate.alloc().init()
     window.setDelegate_(delegate)
     bridge = Bridge.alloc().init()
+    bridge.inflight = set()
     bridge.page = (asset_directory() / "index.html").resolve()
     config = WebKit.WKWebViewConfiguration.alloc().init()
     config.setWebsiteDataStore_(WebKit.WKWebsiteDataStore.nonPersistentDataStore())

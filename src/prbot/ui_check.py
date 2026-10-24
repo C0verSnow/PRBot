@@ -126,6 +126,45 @@ true;
     def poll_result():
         web.evaluateJavaScript_completionHandler_("window.__uiCheckResult || 'pending'", checked)
 
+    def paste_request(value, error):
+        if finished:
+            return
+        if not error and value:
+            # Exercise the actual native Cmd+V menu equivalent and WebKit responder chain.
+            board = AppKit.NSPasteboard.generalPasteboard()
+            board.clearContents()
+            board.setString_forType_("native-paste-fixture", AppKit.NSPasteboardTypeString)
+            key_event = getattr(
+                AppKit.NSEvent,
+                "keyEventWithType_location_modifierFlags_timestamp_windowNumber_context_"
+                "characters_charactersIgnoringModifiers_isARepeat_keyCode_",
+            )
+            event = key_event(
+                AppKit.NSEventTypeKeyDown,
+                (0, 0),
+                AppKit.NSEventModifierFlagCommand,
+                0,
+                web.window().windowNumber(),
+                None,
+                "v",
+                "v",
+                False,
+                9,
+            )
+            handled = (
+                AppKit.NSApplication.sharedApplication().mainMenu().performKeyEquivalent_(event)
+            )
+            web.evaluateJavaScript_completionHandler_(
+                "window.__pasteRequest = false; window.__pasteHandled = "
+                + ("true" if handled else "false"),
+                None,
+            )
+        AppHelper.callLater(0.05, paste_poll)
+
+    def paste_poll():
+        if not finished:
+            web.evaluateJavaScript_completionHandler_("!!window.__pasteRequest", paste_request)
+
     def poll():
         if finished:
             return
@@ -140,6 +179,16 @@ true;
         if not result or error:
             AppHelper.callLater(0.25, poll)
             return
+        def home_snapshot(image, snapshot_error):
+            if snapshot_error or image is None:
+                return
+            bitmap = AppKit.NSBitmapImageRep.imageRepWithData_(image.TIFFRepresentation())
+            data = bitmap.representationUsingType_properties_(AppKit.NSBitmapImageFileTypePNG, {})
+            data.writeToFile_atomically_(str(output.with_name(output.stem + "-home.png")), True)
+
+        web.takeSnapshotWithConfiguration_completionHandler_(
+            WebKit.WKSnapshotConfiguration.alloc().init(), home_snapshot
+        )
         # Native ready/status bridge has completed. Await React's updates after user events.
         web.evaluateJavaScript_completionHandler_(
             """
@@ -152,7 +201,7 @@ true;
     'Sidebar width is not 252px');
   assert(getComputedStyle(document.querySelector('#composer')).borderRadius === '17px',
     'Composer border radius missing');
-  assert(document.querySelectorAll('[data-view]').length === 2);
+  assert(document.querySelectorAll('[data-view]').length === 3);
   assert(document.getElementById('send').disabled, 'Invalid empty submission is enabled');
   const input = document.getElementById('draft');
   const edit = (element, value) => {
@@ -244,7 +293,46 @@ true;
     const button = document.querySelector('[data-section="' + name + '"]');
     await waitFor(() => !button.disabled); button.click(); await tick();
   };
+  const intercepted = handler.postMessage;
+  handler.postMessage = body => {
+    if (body.action === 'connections') window.__slowConnection = body;
+    else intercepted.call(handler, body);
+  };
   await select('Connections');
+  assert(window.__slowConnection, 'Connections request not started');
+  assert(!field('id-token').disabled, 'Connection refresh disabled token input');
+  edit(field('id-token'), 'unsaved-connection-draft'); field('id-token').focus(); await tick();
+  const tokenNode = field('id-token');
+  const stable = {ok:true, status:{state:'stopped',loaded:false},tasks:[]};
+  window.receiveNative(stable); await tick();
+  let mutations = 0;
+  const stableObserver = new MutationObserver(() => mutations++);
+  stableObserver.observe(field('settings'),
+    {subtree:true,attributes:true,childList:true,characterData:true});
+  for (let index = 0; index < 4; index++) window.receiveNative(stable);
+  await tick(); stableObserver.disconnect();
+  assert(mutations === 0, 'Unchanged background status mutated Settings');
+  assert(field('id-token') === tokenNode && document.activeElement === tokenNode,
+    'Polling remounted or blurred connection input');
+  const switchStart = performance.now();
+  await select('Workspace');
+  assert(performance.now() - switchStart < 500, 'Settings navigation blocked by connections');
+  const pendingConnection = window.__slowConnection;
+  window.receiveNative({ok:true,completed_action:'connections',bridge_id:pendingConnection.bridge_id,
+    connections:{id_token:'refreshed-token',infisical:'Connected',project:'fixture'}});
+  await tick(); await select('Connections');
+  assert(field('id-token').value === 'unsaved-connection-draft',
+    'Connection response overwrote draft');
+  handler.postMessage = intercepted;
+  const nativePaste = async element => {
+    edit(element, ''); await tick(); element.focus();
+    window.__pasteHandled = false; window.__pasteRequest = true;
+    await waitFor(() => !window.__pasteRequest);
+    await waitFor(() => element.value === 'native-paste-fixture');
+    assert(window.__pasteHandled, 'Cmd+V menu shortcut was not handled');
+    assert(document.activeElement === element, 'Native paste lost focus');
+  };
+  await nativePaste(field('id-token'));
   const fetchToken = field('fetch-codex-id-token');
   await waitFor(() => !fetchToken.disabled); fetchToken.click(); await tick();
   // The bridge unlocks controls before SettingsPanel's effect renders the token.
@@ -297,6 +385,11 @@ true;
     for (const [key,value] of Object.entries(values)) { edit(field(key), value); await tick(); }
   };
   checkFieldHelp();
+  for (const key of Object.keys(examples)) await nativePaste(field(key));
+  // Restore blank initial values after proving native paste reaches controlled fields.
+  for (const key of ['INFISICAL_CLIENT_ID','INFISICAL_PROJECT_ID','INFISICAL_CLIENT_SECRET']) {
+    edit(field(key), ''); await tick();
+  }
   assert(field('INFISICAL_CLIENT_ID').value === '', 'Client ID example became input');
   assert(field('INFISICAL_PROJECT_ID').value === '', 'Project ID example became input');
   assert(field('INFISICAL_CLIENT_SECRET').value === '', 'Secret example became input');
@@ -362,6 +455,13 @@ true;
   assertValues(updated, true); checkFieldHelp();
   assert(field('INFISICAL_CLIENT_SECRET').placeholder.includes('Configured'),
     'Blank save lost configured Secret');
+  // Saving a draft reverted to its original values must still acknowledge success.
+  edit(field('INFISICAL_SECRET_PATH'), '/temporary-draft'); await tick();
+  edit(field('INFISICAL_SECRET_PATH'), updated.INFISICAL_SECRET_PATH); await tick();
+  assert(!field('save-configuration').disabled, 'Reverted draft was not marked dirty');
+  field('save-configuration').click(); await tick();
+  await waitFor(() => !field('INFISICAL_URL').disabled && field('save-configuration').disabled);
+  assertValues(updated, true);
   await select('Background Service');
   await tick();
   assert(document.querySelectorAll('#service-power').length === 1);
@@ -374,6 +474,56 @@ true;
   document.getElementById('close-settings').click();
   await tick();
   assert(!document.getElementById('settings').open);
+  await nativePaste(field('draft'));
+  const statusArea = document.querySelector('[aria-label="Task status"]');
+  assert(field('composer').compareDocumentPosition(statusArea)
+    & Node.DOCUMENT_POSITION_FOLLOWING, 'Execution feedback is above composer');
+  assert(!document.querySelector('[aria-label="Conversation history"]'),
+    'History leaked into Issue workspace');
+  document.querySelector('[data-view="Chat History"]').click(); await tick();
+  assert(document.querySelector('[aria-label="Conversation history"]'),
+    'Missing independent Chat History');
+  assert(!field('target-link'), 'Private chat requires a GitHub link');
+  document.querySelector('[data-view="Issue"]').click(); await tick();
+  field('user').focus();
+  // Keep a deterministic fixture visible for scroll, answer-routing and screenshot evidence.
+  const routed = [];
+  handler.postMessage = body => routed.push(body);
+  const fixtureTask = {id:'ui-waiting-task',conversation_id:'ui',mode:'Issue',
+    status:'needs_clarification',created_at:1,
+    result:JSON.stringify({summary:'Which branch should I use?',outcome:'needs_clarification',
+      pr_url:'',validation:'Waiting for your answer'}),
+    events:Array.from({length:35},(_,index) => ({sequence:index,kind:'text',created:index+1,
+      text:'Reviewed repository context · step ' + index}))};
+  window.receiveNative({ok:true,tasks:[JSON.parse(JSON.stringify(fixtureTask))],
+    tasks_revision:999999999}); await tick();
+  const feed = document.querySelector('.execution-feed');
+  feed.scrollTop = 0; feed.dispatchEvent(new Event('scroll')); await tick();
+  field('draft').focus();
+  const draftValue = field('draft').value;
+  fixtureTask.events.push({sequence:36,kind:'text',created:36,text:'Ready for your answer.'});
+  window.receiveNative({ok:true,tasks:[JSON.parse(JSON.stringify(fixtureTask))],
+    tasks_revision:999999999}); await tick();
+  assert(feed.scrollTop === 0, 'New feedback interrupted historical reading');
+  assert(document.activeElement === field('draft') && field('draft').value === draftValue,
+    'Feedback changed composer focus or text');
+  feed.scrollTop = feed.scrollHeight; feed.dispatchEvent(new Event('scroll')); await tick();
+  fixtureTask.events.push({sequence:37,kind:'text',created:37,text:'Task safely paused.'});
+  window.receiveNative({ok:true,tasks:[JSON.parse(JSON.stringify(fixtureTask))],
+    tasks_revision:999999999}); await tick();
+  assert(feed.scrollHeight - feed.scrollTop - feed.clientHeight < 2,
+    'Feedback did not follow near the bottom');
+  edit(field('answer-ui-waiting-task'), 'Use feature/ui'); await tick();
+  const answerForm = field('answer-ui-waiting-task').closest('form');
+  answerForm.requestSubmit(); await tick();
+  const reply = routed.find(body => body.action === 'answer');
+  assert(reply && reply.task_id === fixtureTask.id && reply.text === 'Use feature/ui',
+    'Answer was submitted as an unrelated new task');
+  window.receiveNative({ok:false,completed_action:'answer',bridge_id:reply.bridge_id,
+    message:'Fixture: waiting for your answer'}); await tick();
+  assert(field('answer-ui-waiting-task').value === 'Use feature/ui', 'Failed reply lost draft');
+  document.querySelector('main').scrollTop = document.querySelector('main').scrollHeight;
+  field('user').focus();
   assert(document.activeElement.id === 'user', 'Dialog did not restore focus');
   assert(!/[\u4e00-\u9fff]/.test(document.body.innerText), 'Non-English product copy');
   window.__uiCheckResult = 'ok';
@@ -384,4 +534,5 @@ true;
         )
 
     AppHelper.callLater(0.25, poll)
-    AppHelper.callLater(45, lambda: finish(False, "UI load or snapshot timed out"))
+    AppHelper.callLater(0.25, paste_poll)
+    AppHelper.callLater(75, lambda: finish(False, "UI load or snapshot timed out"))

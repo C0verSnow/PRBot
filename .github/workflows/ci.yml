@@ -13,7 +13,7 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: ci-${{ github.head_ref || github.ref_name }}
+  group: ci-${{ github.head_ref || github.ref_name }}-${{ github.event_name == 'workflow_dispatch' && inputs.acceptance && 'providers' || 'checks' }}
   cancel-in-progress: true
 jobs:
   test:
@@ -113,6 +113,12 @@ jobs:
         env:
           PRBOT_ACCEPTANCE_BOOTSTRAP: ${{ secrets.PRBOT_ACCEPTANCE_BOOTSTRAP }}
           PRBOT_ACCEPTANCE_CODEX_AUTH: ${{ secrets.PRBOT_ACCEPTANCE_CODEX_AUTH }}
+          INFISICAL_URL: ${{ secrets.INFISICAL_URL }}
+          INFISICAL_CLIENT_ID: ${{ secrets.INFISICAL_CLIENT_ID }}
+          INFISICAL_CLIENT_SECRET: ${{ secrets.INFISICAL_CLIENT_SECRET }}
+          INFISICAL_PROJECT_ID: ${{ secrets.INFISICAL_PROJECT_ID }}
+          INFISICAL_ENVIRONMENT: ${{ secrets.INFISICAL_ENVIRONMENT }}
+          INFISICAL_SECRET_PATH: ${{ secrets.INFISICAL_SECRET_PATH }}
           PRBOT_ACCEPTANCE_OUTPUT: ${{ runner.temp }}/provider-evidence.json
           GH_TOKEN: ${{ github.token }}
         run: PYTHONPATH=src python -m prbot.main provider-check
