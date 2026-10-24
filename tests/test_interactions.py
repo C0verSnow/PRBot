@@ -41,6 +41,41 @@ async def waiting(app):
     await app.execute(app.request("request-one"))
 
 
+async def test_infisical_root_path_does_not_corrupt_task_target_or_workspace(
+    app, monkeypatch, tmp_path
+):
+    monkeypatch.setenv("PRBOT_WORK_ROOT", str(tmp_path))
+    monkeypatch.setattr(
+        "prbot.secrets.bootstrap",
+        lambda: {"INFISICAL_SECRET_PATH": "/", "INFISICAL_CLIENT_SECRET": "tiny"},
+    )
+    await app.submit(
+        "path-regression",
+        "local:me",
+        "desktop",
+        "Issue",
+        "https://github.com/o/r/issues/11",
+        "Fix a/b without exposing tiny",
+    )
+    payload = json.loads(app.request("path-regression")["payload"])
+    assert payload["workspace_root"] == str(tmp_path)
+    assert payload["repo"] == "o/r"
+    assert payload["link"] == "https://github.com/o/r/issues/11"
+    assert payload["text"] == "Fix a/b without exposing [REDACTED]"
+    await app.execute(app.request("path-regression"))
+    assert app.adapter.invoke.call_args.args[0] == tmp_path
+
+
+def test_long_infisical_secret_path_is_configuration_not_credential(app, monkeypatch):
+    monkeypatch.setattr(
+        "prbot.secrets.bootstrap",
+        lambda: {"INFISICAL_SECRET_PATH": "/staging/project", "INFISICAL_CLIENT_SECRET": "tiny"},
+    )
+    assert app.clean("Path /staging/project; secret tiny") == (
+        "Path /staging/project; secret [REDACTED]"
+    )
+
+
 async def test_answer_resumes_original_task_with_question_and_answer_after_restart(app):
     await waiting(app)
     reopened = ConversationService(archive=app.archive, adapter=app.adapter, values={})
