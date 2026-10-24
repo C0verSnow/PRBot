@@ -20,7 +20,7 @@
 
 不执行本地编译、构建或测试。只做源码、AST 和差异检查，使用现有远程 CI 跑 Python 回归、Ruff、TypeScript、前端构建、WKWebView 实际窗口和 DMG 安装检查。
 
-新增回归覆盖 All、重启断网、本地副本用户与授权隔离、会话分页、Redis 地址隔离、Token 轮换、重复保存补副本以及初始化保留旧数据。窗口验收覆盖默认历史、卡片、换行、模式切换、分页、旧响应、失败重试、空状态和显式私聊入口。最终结果在远端 CI 完成后补录。
+新增回归覆盖 All、重启断网、本地副本用户与授权隔离、会话分页、Redis 地址隔离、Token 轮换、重复保存补副本以及初始化保留旧数据。窗口验收覆盖默认历史、卡片、换行、模式切换、分页、旧响应、失败重试、空状态和显式私聊入口。最终验收结果见下方记录。
 
 ## 边界
 
@@ -42,3 +42,14 @@
 | 设置页数据库位置 | `frontend/src/components/SettingsPanel.tsx:82` |
 
 准确行号基于功能提交 `742ac4891007debff6d617b9cc82f29aca88890f`。
+
+
+## 最终验收结果
+
+[远端 CI 40084768706](https://github.com/C0verSnow/PRBot/actions/runs/40084768706) 对提交 `5e1c813b382e41515ad36dc27aa87db9b824b2a7` 全部通过：231 个 Python 测试、Ruff、TypeScript、前端构建、源码 WKWebView 窗口、DMG 构建与挂载复制、内置运行时、安装版 WKWebView 窗口和签名检查。
+
+[source-ui.json](evidence/issue-15/source-ui.json) 与 [installed-ui.json](evidence/issue-15/installed-ui.json) 均为 `ok:true`，检查了常规窗口与最小窗口。完整截图、测试 XML 和开发版 DMG 可从该流程的 Artifacts 获取。没有执行本地编译、构建或测试，也未重新运行会消耗模型额度的真实提供商验收。
+
+安装版第一轮曾在受理后清空草稿的 40 毫秒断言处失败；验收改为在有超时的条件等待后确认草稿为空，原检查仍保留，最终源码和安装版均通过。
+
+[PR #16](https://github.com/C0verSnow/PRBot/pull/16) 已结束草稿状态，可审查；[Issue #15](https://github.com/C0verSnow/PRBot/issues/15) 已按任务要求关闭。PR 保持待合并。
