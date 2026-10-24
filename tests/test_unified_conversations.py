@@ -373,3 +373,11 @@ async def test_same_second_telegram_dialogue_uses_integer_logical_order(app, upd
         values.extend([message["message_id"], json.dumps(message)])
     store.command = AsyncMock(return_value=["0", values])
     assert [m["logical_order"] for m in await store.messages()] == [18, 19, 20, 21]
+
+
+async def test_malformed_answer_returns_archived_usage_and_does_not_halt_receiver(app, update):
+    flow = TelegramConversations(app)
+    reply = await flow.handle_async(update("/answer", uid=40), "answer")
+    assert reply == "Use /answer <task-id> <answer>."
+    assert app.archive.save.call_args.args[0]["role"] == "assistant"
+    assert app.request("telegram:40") is None

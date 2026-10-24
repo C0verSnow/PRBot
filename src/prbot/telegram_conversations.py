@@ -124,11 +124,13 @@ class TelegramConversations:
                 # priority over task creation and ambiguous implicit matching.
                 explicit = re.match(r"^/answer(?:@\w+)?\s+([\w:-]+)\s+(.+)$", text, re.S)
                 reply_to = getattr(message, "reply_to_message", None)
+                if command == "answer" and not explicit:
+                    return await self.record_response(update, "Use /answer <task-id> <answer>.")
                 selected = None
                 if explicit:
                     selected = explicit[1]
                     snapshot["answer"] = explicit[2]
-                elif reply_to:
+                elif reply_to and not command:
                     notice = db.execute(
                         "SELECT n.task_id,n.round FROM telegram_notices n "
                         "JOIN requests r ON r.id=n.task_id "
