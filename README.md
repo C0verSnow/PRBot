@@ -15,7 +15,7 @@ Desktop / Telegram → shared task service → Codex (Full Access) → GitHub PR
 3. In Infisical, add `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN`, and optionally `TELEGRAM_BOT_TOKEN` (`PR_BOT_TOKEN` is accepted for existing deployments). Desktop tasks do not require Telegram.
 4. Sign in with Codex on the same Mac. Connections uses the complete `~/.codex/auth.json`. **Fetch Codex ID Token** reads only its native `tokens.id_token`, independently of Infisical, and fills the editable field. Fetch does not refresh, sign in, apply a manual override, or change native credentials. Failure preserves the current input. Choose **Use token** to apply the fetched or manually edited value. The access token and other login fields remain native. ID token edits are kept in the current window only. Normal SDK token refreshes update an unchanged native Codex sign-in; manual ID edits never overwrite it. No subscription tier check is performed.
 5. GitHub uses the host Git credential provider, or `GITHUB_TOKEN` from Infisical. No `gh` installation is required. The account must have the target repository permissions needed for the requested changes.
-6. Choose Issue or Pull Request, enter the link and a non-empty requirement (up to 12,000 characters), then Send. Live execution feedback and the final result appear above the input. Waiting tasks show an answer field that continues the same task. Browse saved conversations in the separate Chat History view, with all conversations selected initially, session previews and multiline message cards. New private chat opens a separate composer without a GitHub link. Each mode retains its draft while switching tabs.
+6. Open GitHub workspace and enter a repository, Issue or Pull Request link plus a non-empty requirement (up to 12,000 characters). The arrow sends it; URL type is detected automatically. New creates an independent session without stopping other work. Cancel confirms discarding an unsent draft. During queued/running tasks the arrow becomes Stop; the stopping state remains until process cleanup finishes. Expand Chat History in the sidebar to revisit saved sessions. Private chat opens a composer without a GitHub link. Waiting tasks use Continue task to answer in their original context.
 
 [使用手册](使用手册.md) · [Configuration and migration](docs/任务配置.md) · [Verification record](docs/验收记录.md)
 
@@ -61,7 +61,7 @@ Chat History 可浏览本地及当前授权 Telegram 用户的消息，保留会
 
 ### Issue #15: readable history and local storage
 
-Chat History opens the saved conversation browser, with loading, empty and retry states. Filter by Issue, Pull Request or private chat; select a titled conversation to load its messages from the server before pagination. New private chat explicitly opens a new question box. Issue/PR task selectors retain completed tasks from the latest 100 execution records; older messages remain available in history.
+Chat History expands a sidebar list of Issue, Pull Request and private sessions with loading, empty and retry feedback. Selecting a titled conversation loads its saved messages with pagination. The latest 100 task records provide live status; older archived sessions remain accessible. GitHub workspace replaces the separate Issue/PR pages. See the Issue #19 section for current controls.
 
 The desktop creates `~/Library/Application Support/PRBot/workbench.sqlite3` at startup, before cloud configuration is required. Settings → Workspace displays its full path. Tasks and events remain in this database; confirmed Redis messages and synchronized history also get a local SQLite copy. On connection failure, cached desktop messages remain readable with a warning. Without fresh cloud authorization, Telegram records stay hidden. Writes still require Redis confirmation; failed submissions remain retryable and are never labelled saved locally. Local copies are separated by Redis endpoint and retained across token rotation. Back up the application data directory and workspace together.
 
@@ -75,3 +75,13 @@ See [Issue #15 implementation and remote validation](docs/Issue15-历史与存�
 历史分页遇到 History changed 时，Retry loading 会重新加载首屏。成功轮询清除页面旧反馈，历史面板自己的加载错误仍保留到重试成功。Telegram 有待回答任务时，包含 GitHub 链接的新需求会提示使用 /FinishIssue，避免被当作答案；也可回复原通知或用 /answer 明确回答。工具提示不再混入 Issue 历史。Telegram 发送结果不明确时仍会重试，可能重复送达，这是保留的投递取舍。
 
 逐项核查与处理见[问题清单](问题清单.md)顶部，执行和远端验证记录见 [tasklist.md](tasklist.md)。
+
+## Issue #19: unified workspace and task Stop
+
+- One GitHub workspace accepts repository, `/issues/N` and `/pull/N` HTTPS URLs; backend mode detection preserves existing execution rules. Private chat remains read-only.
+- New creates an independent UUID context. Nonempty unsent drafts stay accessible in the sidebar for this window. Cancel requires confirmation and only discards the current draft. Drafts are not durable across application restarts.
+- Chat History expands/collapses without stopping tasks. Select a session for messages, status and task continuation. Each session shows at most one unread task-state update badge; viewing it acknowledges the current revision for this window. Repeated polling does not add counts.
+- The arrow sends; a square stops the selected desktop task while queued/running. Cancelling means the request was accepted, not that the worker has stopped. SDK cleanup precedes cancellation archival. Cloud archive failures stay save_pending for storage-only retry. Stop never kills the service or another identity's task. Telegram tasks remain read-only from the desktop.
+- Completed work is not undone by Stop. Review repository changes before starting again. No local build/compilation validation was performed. Test and packaged WebKit evidence is produced by existing remote CI.
+
+Implementation, lifecycle and validation: [Issue #19](docs/Issue19-工作区与任务停止.md).

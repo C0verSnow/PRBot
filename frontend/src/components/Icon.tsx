@@ -8,6 +8,8 @@ const paths = {
   code: 'm7 6-5 6 5 6m10-12 5 6-5 6M14 3l-4 18',
   pin: 'm9 3 10 10M11 5 5 11l8 8 6-6M4 20l5-5',
   chat: 'M4 4h16v12H9l-5 4V4Z',
+  stop: 'M6 6h12v12H6Z',
+  chevron: 'm8 4 8 8-8 8',
   arrow: 'M12 19V5m-6 6 6-6 6 6',
 } as const;
 export type IconName = keyof typeof paths;

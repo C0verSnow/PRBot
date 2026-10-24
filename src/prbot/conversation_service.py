@@ -36,9 +36,12 @@ RESULT_SCHEMA["properties"]["outcome"] = {
 
 
 def target_link(value, mode):
-    if mode not in {"Issue", "Pull Request"} or not isinstance(value, str):
-        raise ConfigError("Choose Issue or Pull Request and enter a GitHub link.")
-    url = urlsplit(value.strip())
+    if mode not in {"GitHub", "Issue", "Pull Request"} or not isinstance(value, str):
+        raise ConfigError("Enter a GitHub repository, issue or pull request link.")
+    try:
+        url = urlsplit(value.strip())
+    except ValueError:
+        raise ConfigError("Enter a valid GitHub repository, issue or pull request link.") from None
     match = re.fullmatch(r"/([\w-]+)/([\w.-]+)(?:/(issues|pull)/([1-9][0-9]*))?/?", url.path)
     if (
         url.scheme != "https"
@@ -160,7 +163,13 @@ class ConversationService:
             repo, kind, number = "", "chat", None
         else:
             repo, kind, number = target_link(link, mode)
-        conversation = self.conversation(actor, source, mode)
+        if mode == "GitHub":
+            mode = "Pull Request" if kind == "pull" else "Issue"
+        # Each new desktop submission is an independent context. Legacy grouped
+        # history and Telegram routing remain readable without migration.
+        conversation = (
+            request_id if source == "desktop" else self.conversation(actor, source, mode)
+        )
         existing = self.request(request_id)
         if existing:
             if existing["actor"] != actor or existing["source"] != source:
@@ -233,6 +242,8 @@ class ConversationService:
             "status": row["status"],
             "result": row["result"],
             "title": json.loads(row["payload"]).get("text", "")[:120],
+            "user_text": json.loads(row["payload"]).get("text", ""),
+            "changed_at": row["changed"],
             "link": json.loads(row["payload"]).get("link", ""),
             "created_at": row["created"],
             "events": events,
@@ -463,10 +474,75 @@ class ConversationService:
         self.event(task_id, "status", "Answer accepted. Continuing this task with saved context.")
         return self.public(self.request(task_id))
 
+    def cancel(self, task_id, actor, source="desktop"):
+        """Claim cancellation atomically; the executor acknowledges after cleanup.
+
+        Never signal a stored PID: another process can own the executor lock and
+        PID reuse could kill unrelated work. It observes this durable claim.
+        """
+        with self.db() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute("SELECT * FROM requests WHERE id=?", (task_id,)).fetchone()
+            if not row or row["actor"] != actor or row["source"] != source:
+                raise ConfigError("Choose one of your own tasks to stop.")
+            if row["status"] == "queued":
+                db.execute(
+                    "UPDATE requests SET status='save_pending',result=?,changed=? WHERE id=?",
+                    (self.cancelled_result(), time.time(), task_id),
+                )
+            elif row["status"] == "running":
+                db.execute(
+                    "UPDATE requests SET status='cancelling',changed=? WHERE id=?",
+                    (time.time(), task_id),
+                )
+        return self.public(self.request(task_id))
+
+    @staticmethod
+    def cancelled_result():
+        return json.dumps({
+            "outcome": "cancelled", "summary": "Task stopped. Existing work and history retained. "
+            "Review repository changes before starting again.",
+            "pr_url": "", "validation": "Stopped by user; unfinished steps were not run.",
+        })
+
+    async def execute_cancellable(self, row):
+        """Keep the execution lock until SDK cleanup and cancellation archival finish."""
+        execution = asyncio.create_task(self.execute(row))
+        requested = False
+        try:
+            while not execution.done():
+                if self.request(row["id"])["status"] == "cancelling":
+                    requested = True
+                    execution.cancel()
+                    break
+                await asyncio.wait({execution}, timeout=0.1)
+            await asyncio.gather(execution, return_exceptions=True)
+        finally:
+            if not execution.done():
+                execution.cancel()
+                await asyncio.gather(execution, return_exceptions=True)
+            # execute() may win the race and notice the durable cancellation
+            # before this watcher. Only now has its adapter finally block exited.
+            if requested or self.request(row["id"])["status"] == "cancelling":
+                self.finish_cancellation(row["id"])
+                try:
+                    await self.save_result(self.request(row["id"]))
+                except ConfigError:
+                    pass  # save_pending is retried by the normal archival loop.
+
+    def finish_cancellation(self, task_id):
+        with self.db() as db:
+            db.execute(
+                "UPDATE requests SET status='save_pending',result=?,changed=? "
+                "WHERE id=? AND status='cancelling'",
+                (self.cancelled_result(), time.time(), task_id),
+            )
+
     def change(self, task_id, status, result=None):
         with self.db() as db:
             db.execute(
-                "UPDATE requests SET status=?,result=COALESCE(?,result),changed=? WHERE id=?",
+                "UPDATE requests SET status=?,result=COALESCE(?,result),changed=? WHERE id=? "
+                "AND status NOT IN ('cancelling','cancelled')",
                 (status, result, time.time(), task_id),
             )
 
@@ -487,7 +563,7 @@ class ConversationService:
         try:
             result = json.loads(row["result"])
             if not isinstance(result, dict) or result.get("outcome") not in {
-                "completed", "needs_clarification", "failed", "delivered_unverified"
+                "completed", "needs_clarification", "failed", "delivered_unverified", "cancelled"
             }:
                 raise ValueError
         except (ValueError, TypeError):
@@ -665,7 +741,8 @@ class ConversationService:
                 await self.verify_delivery(payload, result, token)
             text = self.clean(json.dumps(result, ensure_ascii=False))
             self.change(tid, "save_pending", text)
-            await self.save_result(self.request(tid))
+            if self.request(tid)["status"] == "save_pending":
+                await self.save_result(self.request(tid))
         except asyncio.CancelledError:
             self.change(
                 tid,
@@ -677,7 +754,7 @@ class ConversationService:
         except Exception as error:
             if isinstance(error, TimeoutError):
                 error = SDKFailure("timeout", "turn", "TimeoutError")
-            if self.request(tid)["status"] == "save_pending":
+            if self.request(tid)["status"] in {"save_pending", "cancelling"}:
                 return  # Retry archival only; SDK has already finished.
             message = (
                 str(error)
@@ -709,7 +786,7 @@ class ConversationService:
                     )
                 result = json.dumps(diagnostic)
             self.change(tid, "save_pending", result)
-            if archive_ready:
+            if archive_ready and self.request(tid)["status"] == "save_pending":
                 try:
                     await self.save_result(self.request(tid))
                 except ConfigError:
@@ -834,8 +911,14 @@ class ConversationService:
                         pass
                     continue
                 try:
+                    # Holding the kernel lock proves any previous executor is gone.
                     with self.db() as db:
                         db.execute("BEGIN IMMEDIATE")
+                        db.execute(
+                            "UPDATE requests SET status='save_pending',result=?,changed=? "
+                            "WHERE status='cancelling'",
+                            (self.cancelled_result(), time.time()),
+                        )
                         db.execute(
                             "UPDATE requests SET status='interrupted',result=? "
                             "WHERE status='running'",
@@ -852,7 +935,7 @@ class ConversationService:
                                 (os.getpid(), row["id"]),
                             )
                     if row:
-                        await self.execute(dict(row))
+                        await self.execute_cancellable(dict(row))
                     else:
                         with self.db() as db:
                             pending = db.execute(

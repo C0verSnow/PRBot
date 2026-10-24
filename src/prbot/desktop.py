@@ -224,6 +224,7 @@ def show(check_output=None):
                     "refresh_service",
                     "submit_message",
                     "answer",
+                    "cancel_task",
                     "history",
                     "retry_save",
                     "tasks",
@@ -305,7 +306,8 @@ def show(check_output=None):
                     else:
                         app_service = (
                             ConversationService.for_desktop_read()
-                            if action in {"history", "tasks"} else ConversationService()
+                            if action in {"history", "tasks", "cancel_task"}
+                            else ConversationService()
                         )
                         actor = "local:" + getpass.getuser()
                         if action == "submit_message":
@@ -321,6 +323,13 @@ def show(check_output=None):
                             )
                             extra["accepted"] = task
                             feedback = "Task accepted."
+                        elif action == "cancel_task":
+                            task = app_service.cancel(request.get("task_id"), actor)
+                            feedback = (
+                                "Stop requested. Waiting for SDK process cleanup."
+                                if task["status"] == "cancelling"
+                                else "Task status refreshed. Cancelled queued tasks will not execute."
+                            )
                         elif action == "answer":
                             extra["accepted"] = asyncio.run(
                                 app_service.answer(
