@@ -25,3 +25,20 @@
 ## 边界
 
 本地副本不是离线发送队列；新消息仍需 Redis 确认。未同步过的旧记录需要联网读取一次。历史浏览不会重建丢失的执行状态，也不会重新运行旧任务。任务状态选择器仍保留最近 100 条，完整已存聊天通过历史浏览。数据库与工作目录需一起备份；运行中备份应考虑 SQLite WAL。
+
+
+## 代码入口
+
+| 用户关心的改动 | 对应代码 |
+| --- | --- |
+| 会话列表、消息卡片、加载与重试、显式私聊 | `frontend/src/components/HistoryBrowser.tsx:7` |
+| 已完成任务可选，任务反馈紧靠输入区 | `frontend/src/App.tsx:34` |
+| 所有模式、用户隔离、会话分页、本地回退 | `src/prbot/conversation_service.py:256` |
+| Redis 确认后落本地，重复写入恢复原值 | `src/prbot/conversation_store.py:79` |
+| 云端历史同步到 SQLite | `src/prbot/conversation_store.py:131` |
+| 无云端凭据时读取本人桌面历史 | `src/prbot/conversation_service.py:88` |
+| SQLite 初始化和新增表 | `src/prbot/journal.py:25` |
+| 桌面启动创建数据库与返回路径 | `src/prbot/desktop.py:99` |
+| 设置页数据库位置 | `frontend/src/components/SettingsPanel.tsx:82` |
+
+准确行号基于功能提交 `742ac4891007debff6d617b9cc82f29aca88890f`。

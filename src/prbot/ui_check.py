@@ -273,6 +273,7 @@ true;
       conversation_id:'ui',created_at:1,result:report};
     window.receiveNative({ok:true,busy:false,completed_action:'submit_message',accepted:task,tasks:[task]});
     await tick();
+    await waitFor(() => field('draft').value === '');
     assert(field('draft').value === '', 'Accepted submission did not clear draft');
     assert(document.querySelector('[aria-label="Task status"]').textContent.includes(
       'Delivered · verification incomplete'), 'Delivery is hidden by generic failure');
