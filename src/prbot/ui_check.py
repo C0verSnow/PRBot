@@ -274,12 +274,16 @@ true;
     edit(field('draft'), 'new text typed while submitting'); await tick();
     window.receiveNative({ok:true,busy:false,completed_action:'submit_message',accepted:task,tasks:[task]});
     await tick();
+    await waitFor(() => field('target-link').value === '');
     assert(field('draft').value === 'new text typed while submitting',
       'Accepted submission erased new input');
     edit(field('target-link'), 'https://github.com/owner/repo'); await tick();
     field('composer').requestSubmit(); await tick();
     const nextSubmit = requests.filter(request => request.action === 'submit_message').at(-1);
-    assert(nextSubmit.request_id !== task.id, 'New draft reused accepted request ID');
+    assert(nextSubmit.request_id !== task.id,
+      'New draft reused accepted request ID: ' + JSON.stringify({
+        count:requests.filter(request => request.action === 'submit_message').length,
+        disabled:field('send').disabled, help:field('input-help').textContent}));
     const nextTask = {...task, id:nextSubmit.request_id};
     window.receiveNative({ok:true,completed_action:'submit_message',bridge_id:nextSubmit.bridge_id,
       accepted:nextTask,tasks:[nextTask]});
