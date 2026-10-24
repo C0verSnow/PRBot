@@ -109,15 +109,17 @@ class ConversationService:
 
     def clean(self, text):
         values = dict(self.values)
-        secrets = list(values.values()) + self.runtime_secrets
         sensitive = list(self.runtime_secrets)
         try:
             from prbot.secrets import bootstrap
 
             values.update(bootstrap())
-            secrets.extend(values.values())
         except ConfigError:
             pass
+        # This is a folder selector, despite SECRET appearing in its name. In
+        # particular, treating '/' as a credential destroys URLs and file paths.
+        values.pop("INFISICAL_SECRET_PATH", None)
+        secrets = list(values.values()) + self.runtime_secrets
         sensitive.extend(
             value
             for key, value in values.items()
@@ -170,18 +172,18 @@ class ConversationService:
             if existing["actor"] != actor or existing["source"] != source:
                 raise ConfigError("Request belongs to a different conversation.")
             return self.public(existing)
-        payload = self.clean(
-            json.dumps(
-                {
-                    "repo": repo,
-                    "kind": kind,
-                    "number": number,
-                    "link": link,
-                    "text": text.strip(),
-                    "workspace_root": str(workspace_directory()),
-                    "configuration_file": str(env_path()),
-                }
-            )
+        # Redact user text, not validated routing and trusted filesystem metadata.
+        # A credential matching part of a path must never redirect execution.
+        payload = json.dumps(
+            {
+                "repo": repo,
+                "kind": kind,
+                "number": number,
+                "link": link,
+                "text": self.clean(text.strip()),
+                "workspace_root": str(workspace_directory()),
+                "configuration_file": str(env_path()),
+            }
         )
         now = time.time()
         message = {

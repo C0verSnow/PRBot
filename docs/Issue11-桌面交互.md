@@ -65,3 +65,9 @@ Issue #11 要求验收并完成必要合并流程后才能关闭；创建 PR 不
 新增远端验收：真实 SDK 首轮提问 → 重新打开会话服务恢复等待状态 → 原 task ID 保存回答 → 第二轮用回答中的随机标记写入临时文件并读回。第二轮 SDK 返回后，测试专用 CONNECT 隧道实际切断客户端到真实 Redis 的 HTTPS 通路，验证 `save_pending` 保留结果；恢复通路后 Retry 仅保存、不重跑 SDK，并从 Redis 恢复四条消息。隧道只接受配置的服务目标，不解密 TLS，也不修改 Redis 的真实配置或凭据。
 
 该检查验证客户端传输断线恢复，不等同于提供商整体故障或桌面自动连接状态监控。自动化回归覆盖组织 Secret 空项、Infisical auth 选择、旧配置兼容、本地执行拒绝，以及真实 TCP 隧道已有连接中断和重新连接。执行结果将在远端流程完成后补充。
+
+### 真实配置暴露的路径过滤缺陷
+
+真实验收在 SDK 初始化报 `FileNotFoundError`。安全分类确认缺失的是 workspace；[修复前远端复现 40053125319](https://github.com/C0verSnow/PRBot/actions/runs/40053125319) 显示 194 项通过、两项新增回归失败：`INFISICAL_SECRET_PATH=/` 被凭据识别规则误判，导致任务 JSON 中目录和 URL 的每个 `/` 都被替换为 `[REDACTED]`。较长的 Infisical 路径同样会被错误遮蔽。
+
+`ConversationService.clean` 现在明确排除非凭据字段 `INFISICAL_SECRET_PATH`。提交时只过滤用户文本，保留经校验的仓库路由和本机选择的文件系统元数据；不会因凭据恰好匹配路径片段而改变执行目标。真实 Client Secret、Token、原文和 JSON 转义形式的过滤继续保留。安全错误证据只输出文件目标和来源枚举，不输出真实路径、异常正文或凭据。
