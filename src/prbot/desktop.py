@@ -84,6 +84,16 @@ def settings_request(action, request):
     raise ConfigError("Unsupported settings request.")
 
 
+def cancel_desktop_task(request, actor):
+    """Offline-capable cancellation; never load cloud credentials to stop work."""
+    from prbot.conversation_service import ConversationService
+    from prbot.conversation_store import LocalHistoryArchive
+
+    return ConversationService(archive=LocalHistoryArchive(), values={}).cancel(
+        request.get("task_id"), actor, "desktop"
+    )
+
+
 async def run_desktop_tasks(stop, runtime, factory, retry_delay=3):
     """Recover the executor after unexpected journal/archive errors."""
     while not stop.is_set():
@@ -244,6 +254,7 @@ def show(check_output=None):
                 "history",
                 "connections",
                 "configuration",
+                "cancel_task",
             }
             if action in self.inflight:
                 return
@@ -303,10 +314,21 @@ def show(check_output=None):
                         feedback = perform_action(action)
                     elif action in SETTINGS_ACTIONS:
                         feedback, extra = settings_request(action, request)
+                    elif action == "cancel_task":
+                        import time
+
+                        task = cancel_desktop_task(request, "local:" + getpass.getuser())
+                        extra["task_update"] = task
+                        extra["tasks_revision"] = time.monotonic()
+                        feedback = (
+                            "Stop requested. Waiting for SDK process cleanup."
+                            if task["status"] == "cancelling"
+                            else "Task refreshed. Cancelled queued tasks will not execute."
+                        )
                     else:
                         app_service = (
                             ConversationService.for_desktop_read()
-                            if action in {"history", "tasks", "cancel_task"}
+                            if action in {"history", "tasks"}
                             else ConversationService()
                         )
                         actor = "local:" + getpass.getuser()
@@ -323,13 +345,6 @@ def show(check_output=None):
                             )
                             extra["accepted"] = task
                             feedback = "Task accepted."
-                        elif action == "cancel_task":
-                            task = app_service.cancel(request.get("task_id"), actor)
-                            feedback = (
-                                "Stop requested. Waiting for SDK process cleanup."
-                                if task["status"] == "cancelling"
-                                else "Task refreshed. Cancelled queued tasks will not execute."
-                            )
                         elif action == "answer":
                             extra["accepted"] = asyncio.run(
                                 app_service.answer(

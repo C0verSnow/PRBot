@@ -253,7 +253,7 @@ true;
   assert(field('draft').value === '' && field('target-link').value === '');
   const first = {id:retry.request_id,mode:'Pull Request',source:'desktop',status:'queued',
     conversation_id:retry.request_id,created_at:1,changed_at:1,user_text:'fix',title:'fix',events:[]};
-  complete('submit_message',{accepted:first,tasks:[first]}); await tick();
+  complete('submit_message',{accepted:{...first},tasks:[{...first}]}); await tick();
   assert(!document.querySelector('[data-state="queued"]'), 'Late acceptance changed session');
   assert(document.querySelector('.activity-count').textContent === '1', 'Missing actual activity');
   field('history-toggle').click(); await tick();
@@ -268,7 +268,7 @@ true;
   assert(requests.find(item => item.action === 'cancel_task').task_id === first.id,
     'Wrong stop ID');
   first.status = 'cancelling'; first.changed_at = 2;
-  complete('cancel_task',{tasks:[{...first}]}); await tick();
+  complete('cancel_task',{task_update:{...first}}); await tick();
   assert(field('send').getAttribute('aria-label') === 'Stopping…' && field('send').disabled,
     'Stop acknowledgement presented as terminal');
   first.status = 'cancelled'; first.changed_at = 3;

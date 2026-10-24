@@ -220,3 +220,17 @@ async def test_old_grouped_history_and_new_session_history_restore_together(app)
     selected = await app.desktop_history("local:me", "All", session="workspace-task")
     assert len(selected["messages"]) == 1
     assert selected["messages"][0]["task_id"] == "workspace-task"
+
+
+async def test_native_stop_is_offline_and_cannot_take_telegram_identity(app, monkeypatch):
+    from prbot.desktop import cancel_desktop_task
+
+    await submit(app)
+    loader = Mock(side_effect=AssertionError("Stop must not request cloud credentials"))
+    monkeypatch.setattr("prbot.conversation_service.require_secrets", loader)
+    assert cancel_desktop_task({"task_id": "workspace-task"}, "local:me")["status"] == (
+        "save_pending"
+    )
+    with pytest.raises(ConfigError):
+        cancel_desktop_task({"task_id": "workspace-task"}, "local:other")
+    loader.assert_not_called()

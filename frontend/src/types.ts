@@ -32,7 +32,7 @@ export interface NativeResult {
   connections?: { id_token: string; infisical: string; project: string };
   id_token_result?: { token: string; applied: boolean };
   configuration?: InfisicalConfiguration;
-  accepted?: Task; tasks?: Task[]; tasks_revision?: number;
+  task_update?: Task; accepted?: Task; tasks?: Task[]; tasks_revision?: number;
   history?: { request_id?: string; session?: string; reset?: boolean; mode: HistoryMode; cursor: string; messages: Message[]; sessions?: HistorySession[]; cached?: boolean; warning?: string };
   history_error?: { request_id?: string; message: string };
 }

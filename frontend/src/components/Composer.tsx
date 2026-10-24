@@ -1,11 +1,11 @@
 import type { Draft, Task, Workspace } from '../types';
 import { Icon } from './Icon';
-interface Props { draft: Draft; mode: Workspace; task?: Task; onChange: (value: Draft) => void; busy: boolean; submitting: boolean; onSend: () => void; onStop: () => void; onNew: () => void; onCancel: () => void }
+interface Props { stopPending: boolean; draft: Draft; mode: Workspace; task?: Task; onChange: (value: Draft) => void; busy: boolean; submitting: boolean; onSend: () => void; onStop: () => void; onNew: () => void; onCancel: () => void }
 export function validLink(link: string, mode: Workspace) {
   if (mode === 'Chat History') return true;
   return /^https:\/\/github\.com\/[\w-]+\/(?!\.{1,2}(?:\/|$))[\w.-]+(?:\/(?:issues|pull)\/[1-9]\d*)?\/?$/i.test(link.trim());
 }
-export function Composer({ draft, mode, task, onChange, busy, submitting, onSend, onStop, onNew, onCancel }: Props) {
+export function Composer({ draft, mode, task, onChange, busy, submitting, onSend, onStop, onNew, onCancel, stopPending }: Props) {
   const stopping = task?.status === 'cancelling';
   const active = !!task && ['queued', 'running', 'cancelling'].includes(task.status);
   const reason = !validLink(draft.link, mode) ? 'Enter a GitHub repository, issue or pull request link.'
@@ -20,7 +20,7 @@ export function Composer({ draft, mode, task, onChange, busy, submitting, onSend
     <div className="mt-3 flex items-center gap-3"><button id="new-session" type="button" className="secondary" onClick={onNew}>New</button>
       <button id="cancel-draft" type="button" className="secondary" disabled={submitting || (!draft.link && !draft.text)} onClick={onCancel}>Cancel</button>
       <p id="input-help" className="flex-1 text-xs text-muted">{active ? (stopping ? 'Stop requested. Waiting for process cleanup.' : 'Task accepted. Stop affects only this task; New keeps it running.') : reason || (mode === 'Chat History' ? 'Private conversation · saved to history' : 'Codex · Full Access')}</p>
-      <button id="send" type={active ? 'button' : 'submit'} onClick={active ? onStop : undefined} disabled={busy || stopping || (!active && !!reason) || task?.source === 'telegram'} aria-label={label} title={label} aria-describedby="input-help" className="send-icon rounded-lg bg-accent text-white"><Icon name={active ? 'stop' : 'arrow'} /></button>
+      <button id="send" type={active ? 'button' : 'submit'} onClick={active ? onStop : undefined} disabled={(active ? stopPending : busy) || stopping || (!active && !!reason) || task?.source === 'telegram'} aria-label={label} title={label} aria-describedby="input-help" className="send-icon rounded-lg bg-accent text-white"><Icon name={active ? 'stop' : 'arrow'} /></button>
     </div>
   </form>;
 }
