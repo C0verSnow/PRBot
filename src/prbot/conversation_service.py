@@ -10,16 +10,15 @@ import hashlib
 import json
 import os
 import re
-import sqlite3
 import time
-from contextlib import contextmanager
 from pathlib import Path
 from urllib.parse import urlsplit
 
 from prbot.codex_adapter import CodexAdapter, SDKFailure, parent_rules
 from prbot.config import ConfigError, env_path, workspace_directory
-from prbot.conversation_store import ConversationStore
+from prbot.conversation_store import ConversationStore, LocalHistoryArchive
 from prbot.execution_setup import codex_login, github_token
+from prbot.journal import initialize_journal, journal_db
 from prbot.paths import data_dir
 from prbot.secrets import require_secrets
 
@@ -81,43 +80,17 @@ class ConversationService:
         self.adapter = adapter
         self.runtime_secrets = []
         self.path = data_dir() / "workbench.sqlite3"
-        with self.db() as db:
-            db.executescript("""
-                CREATE TABLE IF NOT EXISTS requests (
-                    id TEXT PRIMARY KEY, actor TEXT, source TEXT, mode TEXT,
-                    conversation TEXT, status TEXT, payload TEXT, result TEXT,
-                    pid INTEGER, created REAL, changed REAL);
-                CREATE TABLE IF NOT EXISTS task_events (
-                    sequence INTEGER PRIMARY KEY AUTOINCREMENT, task_id TEXT,
-                    kind TEXT, text TEXT, created REAL);
-                CREATE TABLE IF NOT EXISTS replies (
-                    id TEXT PRIMARY KEY, task_id TEXT, text TEXT, created REAL);
-                CREATE TABLE IF NOT EXISTS channel_sessions (
-                    scope TEXT PRIMARY KEY, link TEXT, mode TEXT, expires REAL);
-                CREATE TABLE IF NOT EXISTS pending_answers (
-                    task_id TEXT PRIMARY KEY, reply_id TEXT UNIQUE, text TEXT, created REAL);
-                CREATE TABLE IF NOT EXISTS telegram_drafts (
-                    scope TEXT PRIMARY KEY, task_id TEXT);
-                CREATE TABLE IF NOT EXISTS telegram_updates (
-                    id INTEGER PRIMARY KEY, scope TEXT, task_id TEXT, mode TEXT,
-                    snapshot TEXT, content TEXT, created REAL, reply TEXT);
-                CREATE TABLE IF NOT EXISTS telegram_notices (
-                    task_id TEXT, round INTEGER, status TEXT, message_id INTEGER,
-                    attempts INTEGER DEFAULT 0, delivered INTEGER DEFAULT 0,
-                    retry_at REAL DEFAULT 0,
-                    PRIMARY KEY(task_id, round, status));
-            """)
+        initialize_journal()
 
-    @contextmanager
-    def db(self):
-        db = sqlite3.connect(self.path, timeout=30)
-        db.row_factory = sqlite3.Row
-        db.execute("PRAGMA journal_mode=WAL")
+    db = staticmethod(journal_db)
+
+    @classmethod
+    def for_desktop_read(cls):
+        """Viewing saved work does not require a working cloud connection."""
         try:
-            with db:
-                yield db
-        finally:
-            db.close()
+            return cls()
+        except ConfigError:
+            return cls(archive=LocalHistoryArchive(), values={})
 
     def clean(self, text):
         values = dict(self.values)
@@ -250,6 +223,8 @@ class ConversationService:
             "source": row["source"],
             "status": row["status"],
             "result": row["result"],
+            "title": json.loads(row["payload"]).get("text", "")[:120],
+            "link": json.loads(row["payload"]).get("link", ""),
             "created_at": row["created"],
             "events": events,
         }
@@ -278,7 +253,7 @@ class ConversationService:
                 tasks.append(self.public(row))
         return sorted(tasks, key=lambda task: task["created_at"], reverse=True)[:100]
 
-    async def desktop_history(self, actor, mode, cursor="0", count=50):
+    async def desktop_history(self, actor, mode, cursor="0", count=50, session=""):
         from prbot.telegram_auth import actor_ids
 
         # The native host supplies the local actor. Telegram IDs come exclusively
@@ -290,7 +265,18 @@ class ConversationService:
                 f"telegram:{r['id']}": r["task_id"]
                 for r in db.execute("SELECT id,task_id FROM telegram_updates")
             }
-        all_messages = await self.archive.messages()
+        cached = False
+        warning = ""
+        try:
+            all_messages = await self.archive.messages()
+        except ConfigError:
+            if not isinstance(self.archive, ConversationStore):
+                raise
+            all_messages = self.archive.local_messages()
+            if not all_messages and not isinstance(self.archive, LocalHistoryArchive):
+                raise
+            cached = True
+            warning = "Connection unavailable. Showing locally saved history; refresh to sync."
         # Persisted mode metadata keeps task grouping usable even if only Redis
         # history survives. Local execution rows remain authoritative when present.
         remote_modes = {m.get("task_id"): m["mode"] for m in all_messages if m.get("mode")}
@@ -317,9 +303,26 @@ class ConversationService:
                     ),
                     None,
                 )
-            if message_mode == mode:
+            if message_mode and (mode == "All" or message_mode == mode):
+                message["mode"] = message_mode
                 message["content"] = self.clean(message.get("content", ""))
                 messages.append(message)
+        sessions = {}
+        for message in messages:
+            tid = message.get("task_id") or message["conversation_id"]
+            previous = sessions.get(tid)
+            if previous is None:
+                sessions[tid] = {
+                    "id": tid, "title": message.get("content", "")[:120],
+                    "mode": message["mode"], "source": message["source"],
+                    "created_at": message["sequence"],
+                }
+            else:
+                previous["created_at"] = max(previous["created_at"], message["sequence"])
+        if session:
+            messages = [
+                m for m in messages if (m.get("task_id") or m["conversation_id"]) == session
+            ]
         # Keyset cursor survives new writes; refresh uses 0 and replaces the page.
         try:
             start = 0
@@ -343,7 +346,11 @@ class ConversationService:
             if page and start + len(page) < len(messages)
             else "0"
         )
-        return {"messages": page, "cursor": next_cursor, "reset": cursor == "0"}
+        return {
+            "messages": page, "cursor": next_cursor, "reset": cursor == "0",
+            "cached": cached, "warning": warning, "session": session,
+            "sessions": sorted(sessions.values(), key=lambda s: s["created_at"], reverse=True),
+        }
 
     def event(self, task_id, kind, text):
         if kind not in {"progress", "text", "interaction", "status"}:

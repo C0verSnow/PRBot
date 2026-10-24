@@ -93,7 +93,10 @@ def show(check_output=None):
 
     from prbot import service
     from prbot.conversation_service import ConversationService
+    from prbot.journal import initialize_journal
     from prbot.ui import ACTIONS, perform_action
+
+    journal_path = initialize_journal()
 
     # Separate event loop owns the task runner; no model/network operation blocks AppKit.
     loop = asyncio.new_event_loop()
@@ -182,6 +185,7 @@ def show(check_output=None):
                     "detail": report.get("detail", ""),
                     "workspace": state["workspace_root"],
                     "configuration": str(env_path().parent),
+                    "database": str(journal_path),
                 }
             except Exception:
                 status = {"state": "unavailable"}
@@ -281,7 +285,10 @@ def show(check_output=None):
                     elif action in SETTINGS_ACTIONS:
                         feedback, extra = settings_request(action, request)
                     else:
-                        app_service = ConversationService()
+                        app_service = (
+                            ConversationService.for_desktop_read()
+                            if action in {"history", "tasks"} else ConversationService()
+                        )
                         actor = "local:" + getpass.getuser()
                         if action == "submit_message":
                             task = asyncio.run(
@@ -312,15 +319,17 @@ def show(check_output=None):
                             feedback = "Message saved."
                         elif action == "history":
                             mode = request.get("mode")
-                            if mode not in {"Issue", "Pull Request", "Chat History"}:
+                            if mode not in {"All", "Issue", "Pull Request", "Chat History"}:
                                 raise ConfigError("Choose a task mode.")
                             extra["history"] = dict(
                                 asyncio.run(
                                     app_service.desktop_history(
-                                        actor, mode, request.get("cursor", "0")
+                                        actor, mode, request.get("cursor", "0"),
+                                        session=request.get("session", ""),
                                     )
                                 ),
                                 mode=mode,
+                                request_id=request.get("request_id"),
                             )
                         import time
 
@@ -328,10 +337,16 @@ def show(check_output=None):
                         extra["tasks"] = app_service.visible_tasks(actor)
                     AppHelper.callAfter(finish, feedback, True, extra)
                 except ConfigError as error:
-                    AppHelper.callAfter(finish, str(error), False, {})
+                    extra = {"history_error": {
+                        "request_id": request.get("request_id"), "message": str(error)
+                    }} if action == "history" else {}
+                    AppHelper.callAfter(finish, str(error), False, extra)
                 except Exception:
                     AppHelper.callAfter(
-                        finish, "Operation failed. Check connections and retry.", False, {}
+                        finish, "Operation failed. Check connections and retry.", False,
+                        {"history_error": {"request_id": request.get("request_id"),
+                         "message": "History unavailable. Retry loading messages."}}
+                        if action == "history" else {},
                     )
 
             Thread(target=work, daemon=True).start()

@@ -273,6 +273,7 @@ true;
       conversation_id:'ui',created_at:1,result:report};
     window.receiveNative({ok:true,busy:false,completed_action:'submit_message',accepted:task,tasks:[task]});
     await tick();
+    await waitFor(() => field('draft').value === '');
     assert(field('draft').value === '', 'Accepted submission did not clear draft');
     assert(document.querySelector('[aria-label="Task status"]').textContent.includes(
       'Delivered · verification incomplete'), 'Delivery is hidden by generic failure');
@@ -487,24 +488,72 @@ true;
     'Codex status must sit immediately above the composer');
   assert(!document.querySelector('[aria-label="Conversation history"]'),
     'History leaked into Issue workspace');
+  const historyRequests = [];
+  handler.postMessage = body => historyRequests.push(body);
   document.querySelector('[data-view="Chat History"]').click(); await tick();
-  assert(document.querySelector('[aria-label="Conversation history"]'),
-    'Missing independent Chat History');
-  assert(!field('target-link'), 'Private chat requires a GitHub link');
-  window.receiveNative({ok:true,history:{mode:'Chat History',cursor:'0',reset:true,messages:[
-    {conversation_id:'remote',message_id:'one',task_id:'remote-task',source:'telegram',
-      role:'user',content:'Choose new PR5',sequence:1},
-    {conversation_id:'remote',message_id:'two',task_id:'remote-task',source:'telegram',
+  const history = document.querySelector('[aria-label="Conversation history"]');
+  assert(history, 'Missing independent Chat History');
+  assert(!field('composer'), 'History opens with an unrelated question box');
+  assert(history.textContent.includes('Loading conversations'), 'Missing loading state');
+  const latestHistory = () => historyRequests
+    .filter(request => request.action === 'history').at(-1);
+  assert(latestHistory().mode === 'All', 'History does not default to all conversations');
+  const savedSessions = [{id:'remote-task',title:'Choose new PR5',mode:'Issue',
+    source:'telegram',created_at:2}, {id:'other-task',title:'Review pull request',
+    mode:'Pull Request',source:'desktop',created_at:1}];
+  const respondHistory = (data, request = latestHistory()) => window.receiveNative({ok:true,
+    completed_action:'history',bridge_id:request.bridge_id,
+    history:{mode:request.mode,session:request.session,request_id:request.request_id,
+      cursor:'0',reset:true,sessions:savedSessions,messages:[],...data}});
+  respondHistory({messages:[
+    {conversation_id:'remote',message_id:'one',task_id:'remote-task',source:'telegram',mode:'Issue',
+      role:'user',content:'Choose new PR5\\nKeep the existing branch',sequence:1},
+    {conversation_id:'remote',message_id:'two',task_id:'remote-task',source:'telegram',mode:'Issue',
       role:'assistant',content:JSON.stringify({summary:'Continuing original task',
         validation:'',pr_url:''}),sequence:2}
-  ]}}); await tick();
-  const history = document.querySelector('[aria-label="Conversation history"]');
+  ]}); await tick();
   assert(history.textContent.includes('Telegram') && history.textContent.includes('Choose new PR5'),
     'Telegram history missing');
-  assert(!history.querySelector('article.border'), 'History still uses bordered cards');
+  assert(history.querySelectorAll('.history-message').length === 2, 'Missing message cards');
+  assert(history.querySelector('.history-message .whitespace-pre-wrap').textContent.includes('\\n'),
+    'Multiline message content lost');
   assert(history.textContent.includes('Continuing original task')
-    && !history.textContent.includes('"summary"'),
-    'Serialized result leaked into history');
+    && !history.textContent.includes('"summary"'), 'Serialized result leaked into history');
+  const sessionButton = [...history.querySelectorAll('.history-session')]
+    .find(button => button.textContent.includes('Choose new PR5'));
+  sessionButton.click(); await tick();
+  assert(latestHistory().session === 'remote-task', 'Session not filtered by backend');
+  respondHistory({messages:[],cursor:'next-page'}); await tick();
+  [...history.querySelectorAll('button')]
+    .find(button => button.textContent === 'Load more messages').click();
+  await tick();
+  assert(latestHistory().cursor === 'next-page', 'History cursor not sent');
+  respondHistory({reset:false,messages:[{conversation_id:'remote',message_id:'three',
+    task_id:'remote-task',role:'user',content:'Older saved detail',sequence:3}]}); await tick();
+  assert(history.textContent.includes('Older saved detail'), 'Pagination lost messages');
+  const staleRequest = latestHistory();
+  const modeSelect = document.querySelector('[aria-label="History mode"]');
+  modeSelect.value = 'Pull Request'; modeSelect.dispatchEvent(new Event('change',{bubbles:true}));
+  await tick();
+  assert(latestHistory().mode === 'Pull Request' && latestHistory().session === '',
+    'Switching history mode kept an invisible session filter');
+  respondHistory({messages:[{message_id:'stale',content:'Must not appear',sequence:1}]},
+    staleRequest);
+  await tick(); assert(!history.textContent.includes('Must not appear'), 'Stale history won race');
+  const failedRequest = latestHistory();
+  window.receiveNative({ok:false,completed_action:'history',bridge_id:failedRequest.bridge_id,
+    history_error:{request_id:failedRequest.request_id,
+      message:'History unavailable. Retry loading messages.'}});
+  await tick(); assert(history.querySelector('[role="alert"]'), 'Missing history failure state');
+  [...history.querySelectorAll('button')]
+    .find(button => button.textContent === 'Retry loading').click();
+  await tick(); respondHistory({sessions:[],messages:[]}); await tick();
+  assert(history.textContent.includes('No saved messages'), 'Missing empty history guidance');
+  [...history.querySelectorAll('button')]
+    .find(button => button.textContent === 'New private chat').click();
+  await tick();
+  assert(field('composer') && !field('target-link'), 'Private chat entry unavailable');
+  handler.postMessage = originalPost;
   document.querySelector('[data-view="Issue"]').click(); await tick();
   field('user').focus();
   // Keep a deterministic fixture visible for scroll, answer-routing and screenshot evidence.
@@ -549,9 +598,11 @@ true;
   window.receiveNative({ok:true,tasks:[fixtureTask,remoteTask],tasks_revision:999999999});
   await tick();
   assert(!field('answer-ui-telegram-task'), 'Desktop can answer another Telegram identity');
+  const currentTask = document.querySelector('[aria-label="Current task"]');
+  currentTask.value = remoteTask.id;
+  currentTask.dispatchEvent(new Event('change', {bubbles:true})); await tick();
   assert(document.querySelector('[aria-label="Task status"]').textContent.includes(
     'Reply to this task in Telegram'), 'Missing Telegram reply guidance');
-  const currentTask = document.querySelector('[aria-label="Current task"]');
   currentTask.value = fixtureTask.id;
   currentTask.dispatchEvent(new Event('change', {bubbles:true})); await tick();
   assert(document.querySelector('.task-status').textContent.includes(fixtureTask.id),
