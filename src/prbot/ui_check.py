@@ -252,7 +252,8 @@ true;
   field('new-session').click(); await tick();
   assert(field('draft').value === '' && field('target-link').value === '');
   const first = {id:retry.request_id,mode:'Pull Request',source:'desktop',status:'queued',
-    conversation_id:retry.request_id,created_at:1,changed_at:1,user_text:'fix',title:'fix',events:[]};
+    conversation_id:retry.request_id,created_at:1,changed_at:1,
+    user_text:'fix',title:'fix',events:[]};
   complete('submit_message',{accepted:{...first},tasks:[{...first}]});
   await tick();
   assert(!document.querySelector('[data-state="queued"]'), 'Late acceptance changed session');
@@ -286,8 +287,62 @@ true;
   field('cancel-draft').click(); await tick(); field('confirm-cancel').click(); await tick();
   assert(field('draft').value === '' && field('target-link').value === '', 'Cancel did not clear');
   assert(document.querySelector(`[data-session="${first.id}"]`), 'Cancel deleted history');
-  // History index and selected messages keep old storage readable and reject stale replies.
-  complete('history'); await tick(); complete('history'); await tick();
+  // Restore an archived-only session and verify pagination and stale-response guards.
+  const savedSessions = [{id:'remote-task',title:'Restored archived context',mode:'Issue',
+    source:'desktop',created_at:2}, {id:first.id,title:'fix',mode:'Pull Request',
+    source:'desktop',created_at:1}];
+  const latestHistory = () => requests.filter(item => item.action === 'history').at(-1);
+  const respondHistory = (request, data = {}) => window.receiveNative({ok:true,
+    completed_action:'history',bridge_id:request.bridge_id,
+    history:{mode:'All',session:request.session,request_id:request.request_id,
+      cursor:'0',reset:true,sessions:savedSessions,messages:[],...data}});
+  for (let i = 0; i < 5; i++) {
+    const request = latestHistory();
+    if (request) respondHistory(request);
+    await tick();
+    if (latestHistory() === request) break;
+  }
+  document.querySelector('[data-session="remote-task"]').click(); await tick();
+  const oldRequest = latestHistory();
+  respondHistory(oldRequest,{cursor:'next-page',messages:[{
+    conversation_id:'legacy',message_id:'old-user',task_id:'remote-task',role:'user',
+    source:'desktop',sequence:1,content:'Restored first line\\nSecond line'}]});
+  await tick();
+  const history = document.querySelector('[aria-label="Conversation history"]');
+  assert(history.textContent.includes('Restored first line'), 'Archived messages not restored');
+  assert(history.querySelectorAll('.history-message').length === 1, 'Duplicate saved message');
+  [...history.querySelectorAll('button')]
+    .find(button => button.textContent === 'Load more messages').click(); await tick();
+  assert(latestHistory().cursor === 'next-page', 'History pagination cursor lost');
+  respondHistory(latestHistory(),{reset:false,messages:[{
+    conversation_id:'legacy',message_id:'older',task_id:'remote-task',role:'user',
+    source:'desktop',sequence:2,content:'More archived context'}]}); await tick();
+  assert(history.querySelectorAll('.history-message').length === 2, 'History page not appended');
+  // Sending from an archived session must use a fresh task UUID, never the remote ID.
+  edit(field('target-link'),'https://github.com/owner/repo');
+  edit(field('draft'),'New task from saved context'); await tick();
+  field('composer').requestSubmit(); await tick();
+  const historicalSend = requests.filter(item => item.action === 'submit_message').at(-1);
+  assert(historicalSend.request_id !== 'remote-task', 'Archived task ID reused for new work');
+  complete('submit_message',{ok:false,message:'Fixture: not submitted'}); await tick();
+  respondHistory(oldRequest,{messages:[{message_id:'stale',content:'Must not appear'}]});
+  await tick();
+  assert(!history.textContent.includes('Must not appear'), 'Stale history response won race');
+  // Finish any queued request, then exercise error, retry and empty feedback.
+  for (let i = 0; i < 5; i++) {
+    const request = latestHistory(); if (request) respondHistory(request);
+    await tick(); if (latestHistory() === request) break;
+  }
+  [...document.querySelectorAll('aside button')]
+    .find(button => button.textContent === 'Refresh history').click(); await tick();
+  const failedHistory = latestHistory();
+  window.receiveNative({ok:false,completed_action:'history',bridge_id:failedHistory.bridge_id,
+    history_error:{request_id:failedHistory.request_id,message:'Fixture history unavailable'}});
+  await tick(); assert(history.querySelector('[role="alert"]'), 'Missing history error');
+  [...history.querySelectorAll('button')]
+    .find(button => button.textContent === 'Retry loading').click(); await tick();
+  respondHistory(latestHistory(),{sessions:[],messages:[]}); await tick();
+  assert(history.textContent.includes('No saved messages'), 'Missing empty history guidance');
   handler.postMessage = originalPost;
   edit(field('draft'), 'Create documentation and explain acceptance criteria'); await tick();
   document.getElementById('user').click();

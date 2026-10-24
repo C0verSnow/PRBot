@@ -4,7 +4,7 @@
 
 统一 GitHub 导航通过 GitHub mode 调用原有 submit，后端用严格 HTTPS URL 解析映射为 Issue 或 Pull Request；旧 mode 调用仍保留原规则。桌面新任务使用 request UUID 作为独立 conversation_id，历史读取仍兼容旧的按身份和 mode 分组记录。Telegram 的分组与授权不变。
 
-New 保留当前窗口非空草稿并生成新 UUID；Cancel 使用原生 HTML dialog 确认丢弃未提交输入。历史导航与任务执行分离，延迟的接受响应不能切走新会话。发送和回答沿用桥接幂等键及单操作锁，取消使用单独 cancel_task 动作和服务器确定的 local actor。
+New 保留当前窗口非空草稿并生成新 UUID；Cancel 使用原生 HTML dialog 确认丢弃未提交输入。历史导航与任务执行分离，延迟的接受响应不能切走新会话。发送和回答沿用桥接幂等键及单操作锁，取消使用单独 cancel_task 动作和服务器确定的 local actor，不读取云连接凭据，也不被设置页面的耗时操作阻塞。
 
 数字规则：每个非当前会话，若当前任务 status/changed_at 修订尚未在本窗口查看，显示 1；同一修订反复投递不加数。进入会话时确认最新修订。计数不是消息数，也不承诺跨窗口记住阅读进度。
 
