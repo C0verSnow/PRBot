@@ -71,7 +71,8 @@ window.__uiCheckResult = 'pending';
   document.getElementById('user').click();
   await new Promise(resolve => setTimeout(resolve, 80));
   const bounds = document.getElementById('settings').getBoundingClientRect();
-  assert(bounds.left >= 15 && bounds.right <= innerWidth - 15, 'Minimum settings width');
+  assert(bounds.left >= 15 && bounds.right <= innerWidth - 15,
+    `Minimum settings width: left=${bounds.left} right=${bounds.right} viewport=${innerWidth}`);
   assert(bounds.top >= 15 && bounds.bottom <= innerHeight - 15, 'Minimum settings height');
   for (const button of document.querySelectorAll('.workspace-row button')) {
     const rect = button.getBoundingClientRect();

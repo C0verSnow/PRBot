@@ -27,7 +27,7 @@
 }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
 @layer components {
-  .settings-dialog { width: 960px; max-width: calc(100vw - 32px); max-height: calc(100vh - 32px); }
+  .settings-dialog { width: 960px; max-width: calc(100% - 32px); max-height: calc(100vh - 32px); }
   .settings-body { display: grid; grid-template-columns: 208px minmax(0, 1fr); height: min(480px, calc(100vh - 190px)); }
   .settings-nav { padding: 24px 12px; border-right: 1px solid var(--color-line); background: var(--color-sidebar); }
   .settings-content { padding: 28px; overflow-y: auto; }
