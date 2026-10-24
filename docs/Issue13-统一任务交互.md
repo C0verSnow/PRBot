@@ -63,29 +63,39 @@ Settings 初始焦点放到标题，关闭按钮保留 focus-visible 和键盘�
 
 ## 真实提供商验收
 
-[远程验收 40064639370](https://github.com/C0verSnow/PRBot/actions/runs/40064639370) 对后端提交 `a2d1054fb20c01447331cb86355476e44693a8b6` 完整通过 test、dmg、acceptance：220 个测试、Ruff、TypeScript/Vite、源码和安装版 WKWebView、DMG 挂载复制、签名与内嵌 SDK 检查。脱敏结果见 [provider-evidence.json](evidence/issue-13/provider-evidence.json)。
+[远程验收 40064639370](https://github.com/C0verSnow/PRBot/actions/runs/40064639370) 对后端提交 `a2d1054fb20c01447331cb86355476e44693a8b6` 完整通过 test、dmg、acceptance：220 个测试、Ruff、TypeScript/Vite、源码和安装版 WKWebView、DMG 挂载复制、签名与内嵌 SDK 检查。该次脱敏结果见 [初次提供商证据](evidence/issue-13/provider-evidence-initial.json)。
 
 真实 Infisical/Redis/SDK 验收确认主机文件写入和命令、任务幂等、重启历史、真实澄清与回答、Redis 断网恢复且不重跑 SDK；新增 Telegram 适配器测试确认原任务收到回答、重复回答幂等、完整 10 条创建与澄清消息可在桌面读取。该测试使用合成 Telegram Update 与临时授权 Actor，不向真实聊天发消息，也没有修改 Infisical 中的生产授权列表；动态授权新增/撤销/失败/限流由确定性的回归覆盖。
 
-后续仅调整状态指示器紧邻输入框的位置，并补旧 Telegram 消息缺少 mode 时按会话哈希读取的兼容回归；没有更改 SDK 执行或提供商凭据机制。最终提交的完整 223 项测试及安装版位置断言，以 PR #14 最新 Checks 为准，不能把前一提交的 220 项结果冒充为新测试已通过。
+后续仅调整状态指示器紧邻输入框的位置，并补旧 Telegram 消息缺少 mode 时按会话哈希读取的兼容回归；没有更改 SDK 执行或提供商凭据机制。最终功能提交的 223 项测试及安装版位置、只读身份和任务选择断言已在下方列出的新一轮 CI 通过；前一提交的 220 项结果仅作历史记录。
 
 ## 最终代码位置
 
-行号对应本次交付的代码；完整提交 SHA 记录于 PR #14。定位基准的完整 SHA 和修改前范围见本文开头。
+以下行号对应功能代码提交 `a17a8ef2b6111387d1c69b8f0b8852df8ccb2026`；后续交付只更新文档和验收产物。定位基准的完整 SHA 和修改前范围见本文开头。
 
 | 需求 | 修改位置与调用关系 | 影响和验证 |
 | --- | --- | --- |
-| FR-01 | frontend/src/App.tsx 35–42、57–75：历史合并、会话选择、消息流；frontend/src/components/TaskFeed.tsx 4–37：复用结果渲染，历史中不重复事件 | 历史刷新、分页、结果去重；远程 WKWebView 断言 |
+| FR-01 | frontend/src/App.tsx 35–42、57–75：历史合并、会话选择、消息流；frontend/src/components/TaskFeed.tsx 4–38：复用结果渲染，历史中不重复事件 | 历史刷新、分页、结果去重；远程 WKWebView 断言 |
 | FR-02 | src/prbot/conversation_store.py history 61–86、messages 88–116；src/prbot/conversation_service.py desktop_history 281–346；src/prbot/telegram_conversations.py archive_update 22–58、record_response 60–85 | v1 兼容、先排序后分页、Actor 隔离；重启、同秒乱序、写失败回归 |
 | FR-03 | src/prbot/telegram_auth.py actor_ids 10–14、allows 28–46 → src/prbot/secrets.py load_secrets；handle_async 87–209 校验身份后才路由 | 多 ID、新增/撤销、失败拒绝、请求合并；旧任务配置不改变授权缓存 |
-| FR-04 | src/prbot/telegram_conversations.py handle_async 87–209、process 211–265、send_results 268–343 → ConversationService.answer 369–443 → execute 495–668 | 同任务继续、多任务选择、通知轮次、持久化回答预留；src/prbot/acceptance_telegram.py check_telegram 21–131 |
+| FR-04 | src/prbot/telegram_conversations.py handle_async 87–209、process 211–265、send_results 268–343 → ConversationService.answer 369–443 → execute 512–685 | 同任务继续、多任务选择、通知轮次、持久化回答预留；src/prbot/acceptance_telegram.py check_telegram 21–131 |
 | FR-05 | frontend/src/components/SettingsPanel.tsx 16–35、75–76：标题初始焦点与原触发器恢复；frontend/src/style.css 30、47–59：小窗口留白、focus-visible | 真实 WKWebView 首次打开、关闭恢复、小窗口滚动；不移除全局焦点提示 |
-| FR-06 | frontend/src/App.tsx 47–58、72–75 → frontend/src/components/TaskStatus.tsx 2–14；frontend/src/components/SettingsPanel.tsx 108 改静态连接图标 | 当前任务真实状态位于输入区上方，轮询沿用 2 秒，动画支持减少动态效果 |
+| FR-06 | src/prbot/conversation_service.py visible_tasks 265–279 → frontend/src/App.tsx 47–58、72–75 → frontend/src/components/TaskStatus.tsx 2–14；frontend/src/components/SettingsPanel.tsx 108 改静态连接图标 | 当前任务真实状态位于输入区上方，轮询沿用 2 秒，动画支持减少动态效果 |
 
 测试实现集中于 `tests/test_unified_conversations.py`；原有 tasks、interactions、receiver 等回归保留。
 
-状态紧邻输入框的源码窗口验收：提交 `c5be7d4935188d1c8269865b97320c0e1b0019a3` 的 [CI 40064879328](https://github.com/C0verSnow/PRBot/actions/runs/40064879328) 已通过该位置断言，结果见 [source-ui.json](evidence/issue-13/source-ui.json)。下图为远程真实 WKWebView 使用测试任务显示的界面，不是设计稿或真实用户记录。
+状态紧邻输入框的源码窗口验收：提交 `c5be7d4935188d1c8269865b97320c0e1b0019a3` 的 [CI 40064879328](https://github.com/C0verSnow/PRBot/actions/runs/40064879328) 已通过该位置断言，结果见 [source-ui.json](evidence/issue-13/source-ui.json)。下图更新为最终功能提交 a17a8ef 的安装版真实 WKWebView 使用测试任务显示的界面，不是设计稿或真实用户记录。
 
 ![Codex 状态紧邻输入框上方](images/issue13-task-status.png)
 
 桌面轮询通过 `ConversationService.visible_tasks()` 读取同一服务端授权范围的 Telegram 任务，只读展示真实状态；TaskFeed 标注回 Telegram 回复，服务端 answer 仍校验 actor/source，桌面无法代答。新增两项任务归属回归及真实窗口选择/只读断言。
+
+## 最终验收结论
+
+功能提交 `a17a8ef2b6111387d1c69b8f0b8852df8ccb2026` 已通过：
+
+- [PR CI 40065074580](https://github.com/C0verSnow/PRBot/actions/runs/40065074580)：223 个 Python 测试、Ruff、依赖一致性、TypeScript、Vite、源码 WKWebView、DMG 构建、挂载复制、内嵌运行时、签名及安装版窗口检查全部通过。
+- [真实提供商 CI 40065099647](https://github.com/C0verSnow/PRBot/actions/runs/40065099647)：test、dmg、acceptance 全部通过；包含 Telegram 适配器→真实 Redis→真实 SDK 回答→桌面历史闭环和断线恢复。最终脱敏结果见 [provider-evidence.json](evidence/issue-13/provider-evidence.json)，所有布尔断言均为 true。
+- [安装版窗口证据](evidence/issue-13/installed-ui.json) 为 ok:true；检查包括初始焦点、焦点恢复、分页消息流、紧邻输入框的状态、Telegram 任务只读回复限制和任务选择。
+
+随后交付提交只更新文档、任务过程清单及验收产物，不更改功能代码；其最新 CI 结论见 PR #14 Checks。全部检查成功后按 Issue #13 的要求合并 PR 并自动关闭 Issue。本地未进行编译、构建、测试或冒烟运行。
