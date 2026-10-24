@@ -15,7 +15,7 @@ Desktop / Telegram → shared task service → Codex (Full Access) → GitHub PR
 3. In Infisical, add `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN`, and optionally `TELEGRAM_BOT_TOKEN` (`PR_BOT_TOKEN` is accepted for existing deployments). Desktop tasks do not require Telegram.
 4. Sign in with Codex on the same Mac. Connections uses the complete `~/.codex/auth.json`. **Fetch Codex ID Token** reads only its native `tokens.id_token`, independently of Infisical, and fills the editable field. Fetch does not refresh, sign in, apply a manual override, or change native credentials. Failure preserves the current input. Choose **Use token** to apply the fetched or manually edited value. The access token and other login fields remain native. ID token edits are kept in the current window only. Normal SDK token refreshes update an unchanged native Codex sign-in; manual ID edits never overwrite it. No subscription tier check is performed.
 5. GitHub uses the host Git credential provider, or `GITHUB_TOKEN` from Infisical. No `gh` installation is required. The account must have the target repository permissions needed for the requested changes.
-6. Choose Issue or Pull Request, enter the link and a non-empty requirement (up to 12,000 characters), then Send. Live execution feedback and the final result appear below the input. Waiting tasks show an answer field that continues the same task. Browse saved conversations in the separate Chat History view, with workspace and session filters; private chat needs no GitHub link. Each mode retains its draft while switching tabs.
+6. Choose Issue or Pull Request, enter the link and a non-empty requirement (up to 12,000 characters), then Send. Live execution feedback and the final result appear above the input. Waiting tasks show an answer field that continues the same task. Browse saved conversations in the separate Chat History view, with all conversations selected initially, session previews and multiline message cards. New private chat opens a separate composer without a GitHub link. Each mode retains its draft while switching tabs.
 
 [使用手册](使用手册.md) · [Configuration and migration](docs/任务配置.md) · [Verification record](docs/验收记录.md)
 
@@ -57,3 +57,12 @@ Acceptance performs real SDK turns, checks a question survives reopening the ser
 Telegram 用 `/FinishIssue` 开始任务；收到澄清后回复通知，或发送 `/answer <task-id> <answer>`，会保留原任务继续执行。有多个等待任务时请明确选择。Infisical 的 `PRBOT_TELEGRAM_ACTOR_ID` 支持单个数字或逗号/空格分隔的多个数字 ID，授权最多缓存 60 秒，未知用户触发限流刷新，失败默认拒绝。
 
 Chat History 可浏览本地及当前授权 Telegram 用户的消息，保留会话选择、刷新与分页。输入区上方显示当前 Codex 任务的真实状态；Telegram 连接状态仍在 Settings 中查看。Redis 历史上限为 10 MB，不自动删除；写入失败明确提示并保留重试。SQLite 和工作目录需一并备份，丢失 SQLite 后不能只靠 Redis 自动重建执行任务。完整数据模型、失败恢复和 SDK 新 Thread 继续语义见 [Issue #13 说明](docs/Issue13-统一任务交互.md)。
+
+
+### Issue #15: readable history and local storage
+
+Chat History opens the saved conversation browser, with loading, empty and retry states. Filter by Issue, Pull Request or private chat; select a titled conversation to load its messages from the server before pagination. New private chat explicitly opens a new question box. Issue/PR task selectors retain completed tasks from the latest 100 execution records; older messages remain available in history.
+
+The desktop creates `~/Library/Application Support/PRBot/workbench.sqlite3` at startup, before cloud configuration is required. Settings → Workspace displays its full path. Tasks and events remain in this database; confirmed Redis messages and synchronized history also get a local SQLite copy. On connection failure, cached desktop messages remain readable with a warning. Without fresh cloud authorization, Telegram records stay hidden. Writes still require Redis confirmation; failed submissions remain retryable and are never labelled saved locally. Local copies are separated by Redis endpoint and retained across token rotation. Back up the application data directory and workspace together.
+
+See [Issue #15 implementation and remote validation](docs/Issue15-历史与存储.md).

@@ -3,7 +3,7 @@ import { Icon } from './Icon';
 const copy = {
   Issue: ['Turn GitHub issues into actionable changes.', 'Provide a repository or issue link, then describe the changes you want Codex to make.'],
   'Pull Request': ['Review and refine pull requests.', 'Provide a pull request link and describe the updates or review tasks to perform.'],
-  'Chat History': ['Continue your conversations.', 'Browse saved conversations or ask Codex a private question. Chat is never automatically published to GitHub.'],
+  'Chat History': ['Your conversations.', 'Read saved Issue, Pull Request and private conversations. Select a session to see its complete history.'],
 };
 export function EmptyState({ view }: { view: View }) {
   return <div id="empty-view" className="mb-8 text-center"><Icon name="brand" className="mx-auto size-10 text-accent" />
