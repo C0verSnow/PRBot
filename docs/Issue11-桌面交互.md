@@ -6,7 +6,7 @@
 
 | 需求 | 修改位置 | 实现及边界 |
 | --- | --- | --- |
-| FR-01 执行反馈、回答、历史 | `src/prbot/sdk_worker.py:27`、`:48`，`codex_adapter.py:115`，`conversation_service.py:154`、`:248`、`:269`、`:333`、`:370`、`:526`，`desktop.py:275`，`frontend/src/App.tsx:12`、`components/TaskFeed.tsx:4` | Worker 输出 v1 NDJSON；控制器逐行处理；只允许状态、过滤后的助理说明和明确问题。原任务保存提问和多轮答案、重启恢复、回答幂等和 actor/source 校验。Chat History 独立浏览三类历史及具体会话；私人聊天使用只读沙箱，不注入 GitHub Token、不进入交付验证。 |
+| FR-01 执行反馈、回答、历史 | `src/prbot/sdk_worker.py:29`、`:50`，`codex_adapter.py:117`，`conversation_service.py:110`、`:156`、`:250`、`:271`、`:335`、`:372`、`:533`，`desktop.py:275`，`frontend/src/App.tsx:12`、`components/TaskFeed.tsx:4` | Worker 输出 v1 NDJSON；控制器逐行处理；只允许状态、过滤后的助理说明和明确问题。原任务保存提问和多轮答案、重启恢复、回答幂等和 actor/source 校验。Chat History 独立浏览三类历史及具体会话；私人聊天使用只读沙箱，不注入 GitHub Token、不进入交付验证。 |
 | FR-02 输出位置、顺序、滚动 | `frontend/src/App.tsx:68`，`components/TaskFeed.tsx:4`，`style.css:51` | 输入框在执行区上方；事件有时间和稳定序号。查看旧日志不自动跳底，在底部附近才跟随。消息已在历史展示时不重复展示同一最终结果。 |
 | FR-03 图标 | `frontend/src/components/Icon.tsx:2`、`Sidebar.tsx:5`、`EmptyState.tsx:8` | 统一 24×24 SVG、1.6 线宽和 currentColor。Issue 用圆形问题图标、PR 用分支连线、品牌用机器人。只更新界面品牌；检查 `packaging/PRBot.spec` 确认前端资源随包，未修改 Dock / Finder 图标。 |
 | FR-04 原生粘贴 | `src/prbot/desktop.py:351`，`frontend/src/bridge.ts:3`，`components/SettingsPanel.tsx:63`，`src/prbot/ui_check.py:129` | 原生窗口加入标准 Edit 菜单，通过响应链分派 Cmd+V / Cmd+C / Cmd+X / Cmd+A；后台请求不再禁用输入框。远端实际验证文本、密码、URL 和多行控件粘贴后的 React 值及焦点。 |
@@ -52,7 +52,7 @@
 
 首页截图使用全新测试 HOME，红色提示表示没有配置 Infisical 测试连接。执行区使用有明确 fixture 提示的模拟任务；日期从 Unix 1 开始，绝不作为付费 SDK 执行证据。截图原文件直接来自远端安装包工件，未重绘或修改。
 
-本次不声称已经完成用户实际账号的付费 SDK 多轮问答和真实服务断线重连验收；这些需要专门的提供商 acceptance 环境，不能用模拟任务截图替代。已查询 Actions Secret 配置，`PRBOT_ACCEPTANCE_BOOTSTRAP` 和 `PRBOT_ACCEPTANCE_CODEX_AUTH` 均未配置；一次手动验收流程在执行前被并发 PR 流水线取消，不能算验收。用户明确回复“没有，先交付 PR 并注明验收待办”。真实提供商多轮和服务断线重连保留待办，没有上传本机私人 Codex 登录。键盘菜单粘贴是远端真实 AppKit/WebKit 验证，未在用户当前安装包上操作。
+首轮交付时尚未完成用户实际账号的付费 SDK 多轮问答和真实服务断线重连验收（本段保留首轮历史，后续通过证据见文末）；这些需要专门的提供商 acceptance 环境，不能用模拟任务截图替代。已查询 Actions Secret 配置，`PRBOT_ACCEPTANCE_BOOTSTRAP` 和 `PRBOT_ACCEPTANCE_CODEX_AUTH` 均未配置；一次手动验收流程在执行前被并发 PR 流水线取消，不能算验收。用户明确回复“没有，先交付 PR 并注明验收待办”。真实提供商多轮和服务断线重连保留待办，没有上传本机私人 Codex 登录。键盘菜单粘贴是远端真实 AppKit/WebKit 验证，未在用户当前安装包上操作。
 
 Pull Request：[PR #12](https://github.com/C0verSnow/PRBot/pull/12)。
 
@@ -64,10 +64,22 @@ Issue #11 要求验收并完成必要合并流程后才能关闭；创建 PR 不
 
 新增远端验收：真实 SDK 首轮提问 → 重新打开会话服务恢复等待状态 → 原 task ID 保存回答 → 第二轮用回答中的随机标记写入临时文件并读回。第二轮 SDK 返回后，测试专用 CONNECT 隧道实际切断客户端到真实 Redis 的 HTTPS 通路，验证 `save_pending` 保留结果；恢复通路后 Retry 仅保存、不重跑 SDK，并从 Redis 恢复四条消息。隧道只接受配置的服务目标，不解密 TLS，也不修改 Redis 的真实配置或凭据。
 
-该检查验证客户端传输断线恢复，不等同于提供商整体故障或桌面自动连接状态监控。自动化回归覆盖组织 Secret 空项、Infisical auth 选择、旧配置兼容、本地执行拒绝，以及真实 TCP 隧道已有连接中断和重新连接。执行结果将在远端流程完成后补充。
+该检查验证客户端传输断线恢复，不等同于提供商整体故障或桌面自动连接状态监控。自动化回归覆盖组织 Secret 空项、Infisical auth 选择、旧配置兼容、本地执行拒绝，以及真实 TCP 隧道已有连接中断和重新连接。后续已通过的执行结果见文末。
 
 ### 真实配置暴露的路径过滤缺陷
 
 真实验收在 SDK 初始化报 `FileNotFoundError`。安全分类确认缺失的是 workspace；[修复前远端复现 40053125319](https://github.com/C0verSnow/PRBot/actions/runs/40053125319) 显示 194 项通过、两项新增回归失败：`INFISICAL_SECRET_PATH=/` 被凭据识别规则误判，导致任务 JSON 中目录和 URL 的每个 `/` 都被替换为 `[REDACTED]`。较长的 Infisical 路径同样会被错误遮蔽。
 
 `ConversationService.clean` 现在明确排除非凭据字段 `INFISICAL_SECRET_PATH`。提交时只过滤用户文本，保留经校验的仓库路由和本机选择的文件系统元数据；不会因凭据恰好匹配路径片段而改变执行目标。真实 Client Secret、Token、原文和 JSON 转义形式的过滤继续保留。安全错误证据只输出文件目标和来源枚举，不输出真实路径、异常正文或凭据。
+
+### 后续真实验收结果：已通过
+
+[CI 40053481185](https://github.com/C0verSnow/PRBot/actions/runs/40053481185)，功能提交 `93602c7` 的 test / dmg / acceptance 三项均成功。包含 **196 项 Python 测试**、前端检查和构建、源码及安装包真实 WebKit、DMG 挂载复制和内置运行时。已下载安装包 `PRBot-ui.json` 核对 `ok=true`。
+
+[已下载并核对的真实提供商证据](evidence/issue-11/provider-evidence.json) 为 `ok=true`，所有布尔断言均为 true：真实 Infisical、Redis、GitHub 读取、Full Access 文件和命令执行、执行增量事件、SDK 首轮提问、服务重新打开后恢复等待状态、同任务回答、实际使用答案写文件、断线保留结果、恢复后只补保存不重跑 SDK、完整四条历史恢复、凭据过滤及容量原子检查。测试耗时约 32 秒，使用用户授权的 Infisical 验收登录，没有上传本机登录。认证文件和本轮远端历史字段由验收流程清理。
+
+断线方式为切断客户端与真实 Redis 间的 TLS 隧道，再恢复该隧道；不是使提供商整体停机，也不证明每一种网络故障均已覆盖。截图中的问答仍为明示的 UI fixture；真实 SDK 的证据是上述独立验收 JSON，二者不混用。因旧版本错误过滤而保存的失败任务不自动重放；升级后检查仓库状态，再重新提交需求。
+
+新增验收位置：`.github/workflows/ci.yml:117`、`src/prbot/provider_check.py:25`、`src/prbot/acceptance_interaction.py:21`、`src/prbot/acceptance_network.py:11`；回归在 `tests/test_provider_acceptance.py`、`tests/test_interactions.py` 和 `tests/test_sdk_diagnostics.py`。手动 providers 验收与自动 checks 使用不同并发组，避免 PR 更新中途取消真实任务。
+
+实现、自动验证和真实提供商验收已交付。PR #12 仍待维护者审查及必要合并流程；Issue #11 按原定条件保持打开，不以通过测试代替合并。
