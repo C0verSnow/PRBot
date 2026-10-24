@@ -483,6 +483,8 @@ true;
   const statusArea = document.querySelector('[aria-label="Task status"]');
   assert(statusArea.compareDocumentPosition(field('composer'))
     & Node.DOCUMENT_POSITION_FOLLOWING, 'Execution feedback is below composer');
+  assert(document.querySelector('.task-status').nextElementSibling === field('composer'),
+    'Codex status must sit immediately above the composer');
   assert(!document.querySelector('[aria-label="Conversation history"]'),
     'History leaked into Issue workspace');
   document.querySelector('[data-view="Chat History"]').click(); await tick();
