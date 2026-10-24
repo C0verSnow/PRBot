@@ -98,6 +98,7 @@ async def check():
                 diagnostic = json.loads(row["result"] or "{}")
                 evidence["sdk_error_code"] = diagnostic.get("error_code", "unknown")
                 evidence["sdk_stage"] = diagnostic.get("stage", "unknown")
+                evidence["sdk_exception_type"] = diagnostic.get("exception_type", "unknown")
                 raise ConfigError("Real SDK acceptance failed. Inspect the safe task category.")
             evidence["host_file_write"] = (outside / "write.txt").read_text().strip() == "write-ok"
             evidence["host_shell_command"] = (
