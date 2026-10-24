@@ -30,6 +30,8 @@ def test_acceptance_reads_auth_from_infisical_and_drops_empty_optional_settings(
 
 def test_acceptance_preserves_explicit_secret_override_and_legacy_bootstrap(monkeypatch):
     monkeypatch.setattr(provider_check, "require_secrets", Mock(return_value={}))
+    # Register the key with pytest before the loader intentionally changes it.
+    monkeypatch.setenv("INFISICAL_CLIENT_ID", "initial-identity")
     monkeypatch.setenv("PRBOT_ACCEPTANCE_CODEX_AUTH", "explicit-login")
     monkeypatch.setenv("PRBOT_ACCEPTANCE_BOOTSTRAP", json.dumps({"INFISICAL_CLIENT_ID": "legacy"}))
     assert provider_check.acceptance_credentials()[1] == "explicit-login"
