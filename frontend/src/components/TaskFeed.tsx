@@ -1,5 +1,6 @@
 import { useLayoutEffect, useRef, useState } from 'react';
 import type { SendAction, Task } from '../types';
+import { taskLabel } from './TaskStatus';
 import { TaskResult } from './TaskResult';
 export function TaskFeed({ task, send, busy, archived = false, history = false }: { task: Task; send: SendAction; busy: boolean; archived?: boolean; history?: boolean }) {
   const feed = useRef<HTMLDivElement>(null);
@@ -12,13 +13,8 @@ export function TaskFeed({ task, send, busy, archived = false, history = false }
   useLayoutEffect(() => {
     if (task.status === 'queued') { setAnswer(''); replyId.current = crypto.randomUUID(); }
   }, [task.status]);
-  const label = task.status === 'delivered_unverified' ? 'Delivered · verification incomplete'
-    : task.status === 'save_pending' ? 'Result not saved'
-    : task.status === 'needs_clarification' ? 'Waiting for your answer'
-    : task.status === 'timed_out' ? 'Timed out'
-    : task.status.charAt(0).toUpperCase() + task.status.slice(1);
   return <article className="message-row py-4">
-    <p className="mb-3 text-xs">{new Date(task.created_at * 1000).toLocaleString()} · {label}</p>
+    <p className="mb-3 text-xs">{new Date(task.created_at * 1000).toLocaleString()} · {taskLabel(task.status)}</p>
     <div ref={feed} className="execution-feed space-y-3" onScroll={() => {
       const node = feed.current;
       if (node) follow.current = node.scrollHeight - node.scrollTop - node.clientHeight < 64;
