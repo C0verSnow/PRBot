@@ -505,7 +505,7 @@ true;
       cursor:'0',reset:true,sessions:savedSessions,messages:[],...data}});
   respondHistory({messages:[
     {conversation_id:'remote',message_id:'one',task_id:'remote-task',source:'telegram',mode:'Issue',
-      role:'user',content:'Choose new PR5\nKeep the existing branch',sequence:1},
+      role:'user',content:'Choose new PR5\\nKeep the existing branch',sequence:1},
     {conversation_id:'remote',message_id:'two',task_id:'remote-task',source:'telegram',mode:'Issue',
       role:'assistant',content:JSON.stringify({summary:'Continuing original task',
         validation:'',pr_url:''}),sequence:2}
@@ -513,7 +513,7 @@ true;
   assert(history.textContent.includes('Telegram') && history.textContent.includes('Choose new PR5'),
     'Telegram history missing');
   assert(history.querySelectorAll('.history-message').length === 2, 'Missing message cards');
-  assert(history.querySelector('.whitespace-pre-wrap').textContent.includes('\n'),
+  assert(history.querySelector('.whitespace-pre-wrap').textContent.includes('\\n'),
     'Multiline message content lost');
   assert(history.textContent.includes('Continuing original task')
     && !history.textContent.includes('"summary"'), 'Serialized result leaked into history');

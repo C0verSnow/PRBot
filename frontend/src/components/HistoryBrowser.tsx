@@ -54,7 +54,7 @@ export function HistoryBrowser({ result, send, busy, composer }: {
   const selectedTask = (result.tasks || []).find(task => task.id === session);
   const privateTask = (result.tasks || []).filter(task => task.mode === 'Chat History' && task.source !== 'telegram')
     .sort((a, b) => b.created_at - a.created_at)[0];
-  const hasResult = (taskId: string) => messages.some(message => message.task_id === taskId && message.role === 'assistant');
+  const hasResult = (taskId: string, content?: string) => messages.some(message => message.task_id === taskId && message.role === 'assistant' && message.content === content);
   return <>
     <section aria-label="Conversation history" className="space-y-4">
       <div className="flex flex-wrap items-center gap-3">
@@ -83,7 +83,7 @@ export function HistoryBrowser({ result, send, busy, composer }: {
             <TaskResult content={message.content} send={send} busy={busy} />
           </article>)}
           {cursor !== '0' && <button className="secondary" disabled={loading} onClick={() => load(cursor)}>Load more messages</button>}
-          {selectedTask && <TaskFeed key={selectedTask.id} task={selectedTask} send={send} busy={busy} history archived={hasResult(selectedTask.id)} />}
+          {selectedTask && <TaskFeed key={selectedTask.id} task={selectedTask} send={send} busy={busy} history archived={hasResult(selectedTask.id, selectedTask.result)} />}
         </div>
       </div>
     </section>
