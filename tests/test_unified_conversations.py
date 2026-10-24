@@ -353,3 +353,23 @@ async def test_executor_configuration_cannot_restore_revoked_authorization(app, 
     app.values["PRBOT_TELEGRAM_ACTOR_ID"] = "123"  # An older task selects its own configuration.
     assert not await auth.allows("123")
     assert await auth.allows("456")
+
+
+async def test_same_second_telegram_dialogue_uses_integer_logical_order(app, update):
+    flow = TelegramConversations(app)
+    await flow.handle_async(update("/FinishIssue", uid=9), "finishissue")
+    await flow.handle_async(update("https://github.com/o/r", uid=10))
+    messages = [call.args[0] for call in app.archive.save.await_args_list]
+    assert {m["sequence"] for m in messages} == {1700000000}
+    assert [m["logical_order"] for m in messages] == [18, 19, 20, 21]
+    store = ConversationStore(
+        {
+            "UPSTASH_REDIS_REST_URL": "https://example.upstash.io",
+            "UPSTASH_REDIS_REST_TOKEN": "private",
+        }
+    )
+    values = []
+    for message in reversed(messages):
+        values.extend([message["message_id"], json.dumps(message)])
+    store.command = AsyncMock(return_value=["0", values])
+    assert [m["logical_order"] for m in await store.messages()] == [18, 19, 20, 21]

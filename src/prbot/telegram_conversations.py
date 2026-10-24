@@ -51,9 +51,9 @@ class TelegramConversations:
                 "task_id": route["task_id"],
                 "mode": route["mode"],
                 "logical_order": update.update_id * 2 + (1 if reply else 0),
-                # Telegram event time and update ID establish order independent of
-                # retries/arrival. The reply occupies the next logical half-step.
-                "sequence": route["created"] + (0.000001 if reply else 0),
+                # Same-second messages use integer logical_order, without lossy
+                # floating-point offsets that could put replies after later users.
+                "sequence": route["created"],
             }
         )
 
@@ -62,7 +62,7 @@ class TelegramConversations:
         scope = self.scope(update)
         message = update.message
         date = getattr(message, "date", None)
-        created = (date.timestamp() if date else time.time()) + update.update_id / 1000000000000
+        created = date.timestamp() if date else time.time()
         with self.application.db() as db:
             db.execute(
                 "INSERT OR IGNORE INTO telegram_updates VALUES (?,?,?,?,?,?,?,NULL)",
@@ -182,8 +182,6 @@ class TelegramConversations:
                     snapshot["answer"] = self.application.clean(snapshot["answer"])
                 date = getattr(message, "date", None)
                 created = date.timestamp() if date else time.time()
-                # Telegram update IDs preserve order for same-second events.
-                created += update.update_id / 1000000000000
                 db.execute(
                     "INSERT INTO telegram_updates VALUES (?,?,?,?,?,?,?,NULL)",
                     (

@@ -73,7 +73,14 @@ class ConversationStore:
             messages = [json.loads(value) for value in result[1][1::2]]
             return {
                 "cursor": str(result[0]),
-                "messages": sorted(messages, key=lambda msg: (msg["sequence"], msg["message_id"])),
+                "messages": sorted(
+                    messages,
+                    key=lambda msg: (
+                        msg["sequence"],
+                        msg.get("logical_order", 0),
+                        msg["message_id"],
+                    ),
+                ),
             }
         except (ValueError, KeyError, TypeError, IndexError):
             raise ConfigError("History unavailable. Retry loading messages.") from None
