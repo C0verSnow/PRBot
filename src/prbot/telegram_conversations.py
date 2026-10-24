@@ -27,6 +27,15 @@ class TelegramConversations:
                 "SELECT * FROM telegram_updates WHERE id=?", (update.update_id,)
             ).fetchone()
         if not route:
+            message = update.message
+            if (
+                reply
+                and message
+                and message.from_user
+                and message.chat.type in {"private", "group", "supergroup"}
+                and await self.authorization.allows(str(message.from_user.id))
+            ):
+                await self.record_response(update, reply)
             return
         cid = self.application.conversation(route["scope"], "telegram", route["mode"])
         await self.application.archive.save(
@@ -47,6 +56,33 @@ class TelegramConversations:
                 "sequence": route["created"] + (0.000001 if reply else 0),
             }
         )
+
+    async def record_response(self, update, response):
+        """Keep selection/error/utility replies without assigning an unrelated task."""
+        scope = self.scope(update)
+        message = update.message
+        date = getattr(message, "date", None)
+        created = (date.timestamp() if date else time.time()) + update.update_id / 1000000000000
+        with self.application.db() as db:
+            db.execute(
+                "INSERT OR IGNORE INTO telegram_updates VALUES (?,?,?,?,?,?,?,NULL)",
+                (
+                    update.update_id,
+                    scope,
+                    "",
+                    "Issue",
+                    json.dumps({"response": response}),
+                    self.application.clean(message.text or ""),
+                    created,
+                ),
+            )
+        await self.archive_update(update)
+        await self.archive_update(update, response)
+        with self.application.db() as db:
+            db.execute(
+                "UPDATE telegram_updates SET reply=? WHERE id=?", (response, update.update_id)
+            )
+        return response
 
     async def handle_async(self, update, command=None):
         message = update.message
@@ -104,8 +140,9 @@ class TelegramConversations:
                             "SELECT COUNT(*) FROM replies WHERE task_id=?", (notice["task_id"],)
                         ).fetchone()[0]
                         if notice["round"] != current_round:
-                            return (
-                                "That question has already been answered. Reply to the latest one."
+                            return await self.record_response(
+                                update,
+                                "That question has already been answered. Reply to the latest one.",
                             )
                         selected = notice["task_id"]
                 waiting = db.execute(
@@ -116,12 +153,16 @@ class TelegramConversations:
                 if selected:
                     task = self.application.request(selected)
                     if not task or task["actor"] != scope or task["source"] != "telegram":
-                        return "Choose a waiting task from this Telegram conversation."
+                        return await self.record_response(
+                            update, "Choose a waiting task from this Telegram conversation."
+                        )
                     snapshot.update(task_id=selected, answer=snapshot.get("answer", text))
                 elif not command and not snapshot["session"] and waiting:
                     if len(waiting) != 1:
-                        return "Choose a task: /answer <task-id> <answer>\n" + "\n".join(
-                            row["id"] for row in waiting
+                        return await self.record_response(
+                            update,
+                            "Choose a task: /answer <task-id> <answer>\n"
+                            + "\n".join(row["id"] for row in waiting),
                         )
                     snapshot.update(task_id=waiting[0]["id"], answer=text)
                 if command == "finishissue" or not snapshot["task_id"]:
@@ -157,7 +198,9 @@ class TelegramConversations:
                 )
         # Redis must accept the user's message before any task is queued.
         await self.archive_update(update)
-        response = await self.process(update, command, snapshot, text)
+        response = snapshot.get("response")
+        if response is None:
+            response = await self.process(update, command, snapshot, text)
         await self.archive_update(update, response)
         with self.application.db() as db:
             db.execute(
@@ -244,6 +287,12 @@ async def send_results(application, bot, stop):
                 ).fetchone()
             if notice and (notice["delivered"] or notice["retry_at"] > time.time()):
                 continue
+            if row["status"] == "interrupted":
+                try:
+                    application.select_task_connections(row)
+                    await application.save_result(row)
+                except ConfigError:
+                    continue  # Keep retrying archival before claiming a visible notification.
             result = row["result"] or ""
             try:
                 parsed = json.loads(result)

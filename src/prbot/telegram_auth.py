@@ -20,6 +20,7 @@ class TelegramAuthorization:
 
     def __init__(self, application):
         self.application = application
+        self.grants = actor_ids(application.values.get("PRBOT_TELEGRAM_ACTOR_ID", ""))
         self.expires = time.monotonic() + self.TTL
         self.last_refresh = float("-inf")
         self.lock = asyncio.Lock()
@@ -27,7 +28,7 @@ class TelegramAuthorization:
     async def allows(self, actor):
         async with self.lock:
             now = time.monotonic()
-            known = actor_ids(self.application.values.get("PRBOT_TELEGRAM_ACTOR_ID", ""))
+            known = self.grants
             if actor in known and now < self.expires:
                 return True
             if now - self.last_refresh < self.REFRESH_INTERVAL:
@@ -38,7 +39,8 @@ class TelegramAuthorization:
                 value = values.get("PRBOT_TELEGRAM_ACTOR_ID", "")
             except Exception:
                 value = ""  # Fail closed without echoing provider errors or credentials.
+            self.grants = actor_ids(value)
             self.application.values["PRBOT_TELEGRAM_ACTOR_ID"] = value
             self.expires = time.monotonic() + self.TTL
             self.last_refresh = time.monotonic()
-            return actor in actor_ids(value)
+            return actor in self.grants

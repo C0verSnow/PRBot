@@ -58,3 +58,5 @@ Settings 初始焦点放到标题，关闭按钮保留 focus-visible 和键盘�
 ## 验证记录
 
 本地只做 Python AST 语法阅读检查与 git diff --check；未运行本地测试、构建或编译。系统 Python 没有预装 ruff，后续用独立二进制执行静态检查。完整单元测试、TypeScript 检查、前端构建、真实 WKWebView 焦点/消息流/状态检查及 DMG 安装验收交由现有 GitHub Actions。
+
+首次远端 CI 40058305329 的 215 个测试、Ruff、TypeScript/Vite 已通过，WKWebView 小窗口留白断言失败（截图中弹窗左侧仅约 9px）。宽度限制改用包含块百分比，保留原断言。补充检查选择提示和 /id 回复归档、旧通知轮次拒绝及授权缓存独立性。新增 acceptance_telegram.py，使用 Telegram Update 样本、真实 Redis 和真实 SDK 验证创建→澄清→回答→原任务继续→桌面读取历史；不调用真实 Telegram sendMessage。

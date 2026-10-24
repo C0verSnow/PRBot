@@ -300,3 +300,56 @@ async def test_result_retry_preserves_timestamp_and_does_not_execute_sdk(app):
     assert app.request("pending-task")["changed"] == changed
     app.adapter.invoke.assert_not_awaited()
     assert app.archive.save.call_args.args[0]["created_at"] == changed
+
+
+async def test_selection_and_utility_responses_are_archived_without_wrong_task(app, update):
+    flow = TelegramConversations(app)
+    for uid in (10, 20):
+        await create(flow, update, uid)
+        await app.execute(app.request(f"telegram:{uid}"))
+    response = await flow.handle_async(update("Which task?", uid=30))
+    assert "Choose a task" in response
+    archived = [
+        call.args[0]
+        for call in app.archive.save.await_args_list
+        if call.args[0]["message_id"].startswith("telegram:30:")
+    ]
+    assert len(archived) == 2
+    assert all(m["task_id"] == "" for m in archived)
+    await flow.archive_update(update("/id", uid=31), "Your User ID is 123.")
+    assert app.archive.save.call_args.args[0]["role"] == "assistant"
+    assert app.archive.save.call_args.args[0]["task_id"] == ""
+
+
+async def test_old_notice_cannot_answer_a_new_clarification_round(app, update):
+    flow = TelegramConversations(app)
+    await create(flow, update)
+    await app.execute(app.request("telegram:10"))
+    with app.db() as db:
+        db.execute(
+            "INSERT INTO telegram_notices(task_id,round,status,message_id,delivered) "
+            "VALUES ('telegram:10',0,'needs_clarification',99,1)"
+        )
+    await flow.handle_async(update("PR5", uid=13))
+    await app.execute(app.request("telegram:10"))
+    reply_to = {
+        "message_id": 99,
+        "date": 1700000000,
+        "chat": {"id": 123, "type": "private"},
+        "text": "Old question",
+    }
+    response = await flow.handle_async(update("Wrong round", uid=14, reply_to_message=reply_to))
+    assert "already been answered" in response
+    assert app.request("telegram:10")["status"] == "needs_clarification"
+    assert len(app.continuation(app.request("telegram:10"))["answers"]) == 1
+
+
+async def test_executor_configuration_cannot_restore_revoked_authorization(app, monkeypatch):
+    loader = Mock(return_value={"PRBOT_TELEGRAM_ACTOR_ID": "456"})
+    monkeypatch.setattr("prbot.telegram_auth.load_secrets", loader)
+    auth = TelegramAuthorization(app)
+    auth.expires = 0
+    assert not await auth.allows("123")
+    app.values["PRBOT_TELEGRAM_ACTOR_ID"] = "123"  # An older task selects its own configuration.
+    assert not await auth.allows("123")
+    assert await auth.allows("456")
