@@ -44,3 +44,9 @@ See [implementation and verification evidence](docs/Issue11-桌面交互.md) for
 **Do not build, compile, run source tests or smoke scripts locally.** Local review is limited to reading, static lint/format checks and `git diff --check`. Existing GitHub Actions performs Python tests, real SDK runtime initialization, TypeScript checks, frontend build, native WebKit interaction checks, DMG packaging and installed bundle verification on remote macOS runners.
 
 Real provider acceptance (Infisical, Upstash, paid SDK turn and GitHub delivery) must be recorded separately from mocked regression tests. Do not claim production readiness or close a task based only on UI controls or account lookup.
+
+### Real provider acceptance
+
+Manually dispatch the existing CI workflow on the feature branch with `acceptance=true`. The repository must have access to the organization's six `INFISICAL_*` Actions secrets. The runner reads `PRBOT_ACCEPTANCE_CODEX_AUTH` (the complete test account `auth.json`) from that Infisical environment alongside its Redis settings. An explicit Actions `PRBOT_ACCEPTANCE_CODEX_AUTH` or legacy JSON `PRBOT_ACCEPTANCE_BOOTSTRAP` remains supported. No local Codex login is uploaded.
+
+Acceptance performs real SDK turns, checks a question survives reopening the service, submits an answer to the same task, and verifies that answer through an actual host file write. A CI-only HTTPS tunnel interrupts traffic to real Redis after SDK completion; the task must retain `save_pending`, then save and restore all four dialogue messages after reconnection without another SDK call. This checks client transport recovery, not a provider-wide outage or automatic UI connection monitoring. Only sanitized boolean evidence is uploaded; only this run's archive fields are removed.

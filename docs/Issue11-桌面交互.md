@@ -57,3 +57,11 @@
 Pull Request：[PR #12](https://github.com/C0verSnow/PRBot/pull/12)。
 
 Issue #11 要求验收并完成必要合并流程后才能关闭；创建 PR 不提前关闭，也不自动合并。当前保持打开供维护者审查。
+
+## 后续验收：组织 Secret 与 Infisical
+
+用户已补充组织级六项 `INFISICAL_*` Secret，并授权从 Infisical 读取完整 `PRBOT_ACCEPTANCE_CODEX_AUTH`。工作流按用户提供的路径注入六项配置，空的可选项沿用应用默认值，兼容此前直接注入 auth 和 JSON bootstrap 的方式。没有上传本机登录。
+
+新增远端验收：真实 SDK 首轮提问 → 重新打开会话服务恢复等待状态 → 原 task ID 保存回答 → 第二轮用回答中的随机标记写入临时文件并读回。第二轮 SDK 返回后，测试专用 CONNECT 隧道实际切断客户端到真实 Redis 的 HTTPS 通路，验证 `save_pending` 保留结果；恢复通路后 Retry 仅保存、不重跑 SDK，并从 Redis 恢复四条消息。隧道只接受配置的服务目标，不解密 TLS，也不修改 Redis 的真实配置或凭据。
+
+该检查验证客户端传输断线恢复，不等同于提供商整体故障或桌面自动连接状态监控。自动化回归覆盖组织 Secret 空项、Infisical auth 选择、旧配置兼容、本地执行拒绝，以及真实 TCP 隧道已有连接中断和重新连接。执行结果将在远端流程完成后补充。

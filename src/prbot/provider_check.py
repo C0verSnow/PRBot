@@ -12,6 +12,7 @@ import time
 import uuid
 from pathlib import Path
 
+from prbot.acceptance_interaction import check_interaction
 from prbot.codex_adapter import CodexAdapter
 from prbot.config import ConfigError
 from prbot.conversation_service import ConversationService
@@ -21,12 +22,26 @@ from prbot.github import GitHub
 from prbot.secrets import require_secrets
 
 
+def acceptance_credentials():
+    bootstrap = json.loads(os.environ.pop("PRBOT_ACCEPTANCE_BOOTSTRAP", "") or "{}")
+    os.environ.update({k: v for k, v in bootstrap.items() if k.startswith("INFISICAL_")})
+    # Empty Actions secrets must not override the application's bootstrap defaults.
+    for key in list(os.environ):
+        if key.startswith("INFISICAL_") and not os.environ[key]:
+            del os.environ[key]
+    values = require_secrets("UPSTASH_REDIS_REST_URL", "UPSTASH_REDIS_REST_TOKEN")
+    auth = os.environ.pop("PRBOT_ACCEPTANCE_CODEX_AUTH", "") or values.get(
+        "PRBOT_ACCEPTANCE_CODEX_AUTH", ""
+    )
+    if not auth:
+        raise ConfigError("Missing PRBOT_ACCEPTANCE_CODEX_AUTH in Infisical or Actions secrets.")
+    return values, auth
+
+
 async def check():
     if os.environ.get("CI") != "true":
         raise ConfigError("Provider acceptance is only allowed in remote CI.")
-    bootstrap = json.loads(os.environ.pop("PRBOT_ACCEPTANCE_BOOTSTRAP"))
-    auth = os.environ.pop("PRBOT_ACCEPTANCE_CODEX_AUTH")
-    os.environ.update({k: v for k, v in bootstrap.items() if k.startswith("INFISICAL_")})
+    values, auth = acceptance_credentials()
     auth_path = Path.home() / ".codex/auth.json"
     if auth_path.exists():
         raise ConfigError("Acceptance requires a clean runner without an existing Codex login.")
@@ -38,7 +53,6 @@ async def check():
     fields = []
     scratch_keys = []
     try:
-        values = require_secrets("UPSTASH_REDIS_REST_URL", "UPSTASH_REDIS_REST_TOKEN")
         archive = ConversationStore(values)
         evidence["infisical"] = True
         evidence["redis_ping"] = await archive.command("PING") == "PONG"
@@ -64,7 +78,7 @@ async def check():
                         "validation describing "
                         "what actually ran. Never disclose login or environment secrets."
                     )
-                    return await native_adapter.invoke(path, instruction, schema, timeout)
+                    return await native_adapter.invoke(path, instruction, schema, min(timeout, 240))
 
             adapter = EvidenceAdapter()
             application = ConversationService(archive=archive, adapter=adapter, values=values)
@@ -117,6 +131,7 @@ async def check():
             with application.db() as db:
                 db.execute("DELETE FROM requests WHERE id=?", (rid,))
 
+        await check_interaction(values, fields, evidence)
         prefix = "prbot:acceptance:" + uuid.uuid4().hex
         scratch_keys = [prefix + ":messages", prefix + ":bytes"]
         small = await archive.command("EVAL", SAVE, 2, *scratch_keys, "one", "hello", 10)
