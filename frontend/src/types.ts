@@ -14,7 +14,7 @@ export interface InfisicalConfiguration {
   values: Omit<InfisicalFields, 'INFISICAL_CLIENT_SECRET'>;
   client_secret_set: boolean; environment_overrides: string[]; path: string;
 }
-export interface Draft { workspace?: Workspace; link: string; text: string; request_id: string }
+export interface Draft { created_at?: number; workspace?: Workspace; link: string; text: string; request_id: string }
 export interface ServiceStatus {
   user?: string; loaded?: boolean; state: string; reported_at?: number; control_verified?: boolean; detail?: string;
   workspace?: string; configuration?: string; database?: string; workspace_error?: string; executor?: string;

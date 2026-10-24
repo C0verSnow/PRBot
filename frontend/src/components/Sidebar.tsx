@@ -1,4 +1,5 @@
 import type { HistorySession, Task, Workspace } from '../types';
+import { taskLabel } from './TaskStatus';
 import { Icon } from './Icon';
 interface Props {
   active: Workspace; onSelect: (view: Workspace) => void; onSettings: () => void; user: string;
@@ -19,7 +20,7 @@ export function Sidebar({ active, onSelect, onSettings, user, expanded, onToggle
         {!loading && !error && !sessions.length && <p className="sidebar-note">No saved conversations yet.</p>}
         {sessions.map(item => <button key={item.id} data-session={item.id} className="history-session" aria-current={selected === item.id ? 'true' : undefined} onClick={() => onSession(item.id)}>
           <span className="flex items-start gap-2"><strong className="min-w-0 flex-1 break-words">{item.title || 'Untitled conversation'}</strong>{!!counts[item.id] && <span className="activity-count" aria-label={`${counts[item.id]} unread task updates`}>{counts[item.id]}</span>}</span>
-          <span className="mt-2 block text-xs text-muted">{item.mode === 'Chat History' ? 'Private chat' : item.mode} · {item.source === 'telegram' ? 'Telegram' : 'Desktop'}<br />{new Date(item.created_at * 1000).toLocaleString()}{tasks.find(task => task.id === item.id) && <><br />{tasks.find(task => task.id === item.id)?.status}</>}</span>
+          <span className="mt-2 block text-xs text-muted">{item.mode === 'Chat History' ? 'Private chat' : item.mode} · {item.source === 'telegram' ? 'Telegram' : 'Desktop'}<br />{new Date(item.created_at * 1000).toLocaleString()}{tasks.find(task => task.id === item.id) && <><br />{taskLabel(tasks.find(task => task.id === item.id)?.status || '')}</>}</span>
         </button>)}
       </div>
     </nav>

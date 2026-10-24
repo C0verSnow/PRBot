@@ -7,7 +7,7 @@ import { TaskStatus } from './components/TaskStatus';
 import { TaskFeed } from './components/TaskFeed';
 import { SettingsPanel, serviceLabel } from './components/SettingsPanel';
 import type { Draft, HistorySession, Workspace } from './types';
-const fresh = (workspace: Workspace = 'GitHub'): Draft => ({ link: '', text: '', request_id: crypto.randomUUID(), workspace });
+const fresh = (workspace: Workspace = 'GitHub'): Draft => ({ link: '', text: '', request_id: crypto.randomUUID(), workspace, created_at: Date.now() / 1000 });
 export function App() {
   const { result, busy, submitting, cancelling, send } = useNativeBridge();
   const [initial] = useState(() => fresh());
@@ -75,7 +75,7 @@ export function App() {
   };
   const entries = new Map(sessions.map(item => [item.id, item]));
   for (const task of result.tasks || []) entries.set(task.id, { id: task.id, title: task.title || task.id, mode: task.mode, source: task.source || 'desktop', created_at: task.created_at });
-  for (const [id, item] of Object.entries(drafts)) if (!entries.has(id) && (item.link || item.text)) entries.set(id, { id, title: `Draft · ${(item.text || item.link).slice(0, 120)}`, mode: item.workspace === 'Chat History' ? 'Chat History' : 'Issue', source: 'desktop', created_at: 0 });
+  for (const [id, item] of Object.entries(drafts)) if (!entries.has(id) && (item.link || item.text)) entries.set(id, { id, title: `Draft · ${(item.text || item.link).slice(0, 120)}`, mode: item.workspace === 'Chat History' ? 'Chat History' : 'Issue', source: 'desktop', created_at: item.created_at || 0 });
   const sessionList = [...entries.values()].sort((a, b) => b.created_at - a.created_at);
   const optimistic = currentSubmitting ? submitted.current : null;
   return <div className="flex min-h-screen bg-canvas text-ink">
