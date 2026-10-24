@@ -3,11 +3,12 @@
 import asyncio
 import getpass
 import json
+import logging
 import sys
 from pathlib import Path
 from threading import Thread
 
-from prbot.config import ConfigError, env_path
+from prbot.config import ConfigError
 
 
 def asset_directory():
@@ -83,6 +84,26 @@ def settings_request(action, request):
     raise ConfigError("Unsupported settings request.")
 
 
+async def run_desktop_tasks(stop, runtime, factory, retry_delay=3):
+    """Recover the executor after unexpected journal/archive errors."""
+    while not stop.is_set():
+        try:
+            runtime["service"] = factory()
+            runtime["executor"] = "running"
+            await runtime["service"].run(stop, source="desktop")
+        except Exception as error:
+            runtime["executor"] = "reconnecting"
+            # SQL/SDK exceptions may contain task content or credentials.
+            logging.getLogger(__name__).error(
+                "Desktop executor retry type=%s", type(error).__name__
+            )
+        if not stop.is_set():
+            try:
+                await asyncio.wait_for(stop.wait(), retry_delay)
+            except TimeoutError:
+                pass
+
+
 def show(check_output=None):
     # These imports are intentionally lazy: daemon and CLI never start AppKit/WebKit.
     import AppKit
@@ -103,17 +124,9 @@ def show(check_output=None):
     stop = asyncio.Event()
     runtime = {"service": None, "task": None}
 
-    async def run_tasks():
-        while not stop.is_set():
-            try:
-                runtime["service"] = ConversationService()
-                await runtime["service"].run(stop, source="desktop")
-            except ConfigError:
-                await asyncio.sleep(3)
-
     def background():
         asyncio.set_event_loop(loop)
-        runtime["task"] = loop.create_task(run_tasks())
+        runtime["task"] = loop.create_task(run_desktop_tasks(stop, runtime, ConversationService))
         try:
             loop.run_until_complete(runtime["task"])
         except asyncio.CancelledError:
@@ -125,9 +138,10 @@ def show(check_output=None):
 
     class WindowDelegate(NSObject):
         def windowWillClose_(self, notification):
-            loop.call_soon_threadsafe(stop.set)
-            if runtime["task"]:
-                loop.call_soon_threadsafe(runtime["task"].cancel)
+            if loop.is_running() and not loop.is_closed():
+                loop.call_soon_threadsafe(stop.set)
+                if runtime["task"]:
+                    loop.call_soon_threadsafe(runtime["task"].cancel)
             worker_thread.join(timeout=5)
             AppKit.NSApplication.sharedApplication().terminate_(None)
 
@@ -184,7 +198,11 @@ def show(check_output=None):
                     "control_verified": time.time() - self.control_verified_at < 10,
                     "detail": report.get("detail", ""),
                     "workspace": state["workspace_root"],
-                    "configuration": str(env_path().parent),
+                    "configuration": (
+                        str(Path(state["env_file"]).parent) if state["env_file"] else ""
+                    ),
+                    "workspace_error": state.get("workspace_error", ""),
+                    "executor": runtime.get("executor", "starting"),
                     "database": str(journal_path),
                 }
             except Exception:

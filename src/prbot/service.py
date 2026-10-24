@@ -3,6 +3,7 @@ import os
 import plistlib
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -79,10 +80,13 @@ def stop():
 
 def report(state, detail):
     path = data_dir() / "status.json"
-    tmp = path.with_suffix(".tmp")
-    tmp.write_text(json.dumps({"state": state, "detail": detail, "time": int(time.time())}))
-    tmp.chmod(0o600)
-    tmp.replace(path)
+    fd, temporary = tempfile.mkstemp(prefix=".status-", suffix=".tmp", dir=path.parent)
+    try:
+        with os.fdopen(fd, "w") as output:
+            json.dump({"state": state, "detail": detail, "time": int(time.time())}, output)
+        os.replace(temporary, path)
+    finally:
+        Path(temporary).unlink(missing_ok=True)
 
 
 def status():
@@ -94,10 +98,22 @@ def status():
         last = {}
     from prbot.config import env_path, workspace_directory
 
-    workspace = str(workspace_directory())
+    workspace_error = ""
+    try:
+        workspace = str(workspace_directory())
+        configuration = str(env_path())
+    except ConfigError as error:
+        from prbot.config import read_settings
+
+        workspace = str(
+            os.environ.get("PRBOT_WORK_ROOT") or read_settings().get("PRBOT_WORK_ROOT", "")
+        )
+        configuration = ""
+        workspace_error = str(error)
 
     return {
-        "env_file": str(env_path()),
+        "env_file": configuration,
+        "workspace_error": workspace_error,
         "workspace_root": workspace,
         "agent_loaded": loaded,
         "last_service_report": last,

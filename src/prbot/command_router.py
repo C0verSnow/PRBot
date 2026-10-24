@@ -23,14 +23,14 @@ class CommandRouter:
         match = re.match(r"^/([A-Za-z0-9_]+)(?:@([A-Za-z0-9_]+))?(?=\s|$)", text)
         if not match:
             if self.conversations:
-                return self.conversations.handle(update)
+                raise NotImplementedError("Use dispatch_async for conversation messages.")
             return None
         name, target = match.groups()
         if target and target.lower() != self.username:
             return None
         if name.lower() in {"finishissue", "cancel", "answer"}:
             if self.conversations:
-                return self.conversations.handle(update, name.lower())
+                raise NotImplementedError("Use dispatch_async for conversation commands.")
             return "Repository tasks are unavailable. Check Infisical and Codex sign-in."
         handler = self.handlers.get(name.lower())
         return handler(message) if handler else "Supported commands: /id, /FinishIssue and /cancel."

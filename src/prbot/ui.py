@@ -11,9 +11,12 @@ ACTIONS = {"choose_workspace", "open_configuration", "start_service", "stop_serv
 
 
 def applescript(source):
-    result = subprocess.run(
-        ["/usr/bin/osascript", "-"], input=source, capture_output=True, text=True, timeout=300
-    )
+    try:
+        result = subprocess.run(
+            ["/usr/bin/osascript", "-"], input=source, capture_output=True, text=True, timeout=45
+        )
+    except subprocess.TimeoutExpired:
+        raise ConfigError("Folder selection timed out. Choose folder to try again.") from None
     return result.stdout.strip() if result.returncode == 0 else None
 
 
@@ -39,10 +42,12 @@ def perform_action(action):
     if action == "stop_service":
         service.stop()
         return "Service stopped."
-    config = Config.load()
-    asyncio.run(validate_api(config.token))
-    service.install()
-    return "Starting service. Waiting for a health report."
+    if action == "start_service":
+        config = Config.load()
+        asyncio.run(validate_api(config.token))
+        service.install()
+        return "Starting service. Waiting for a health report."
+    raise ConfigError("Unsupported action.")
 
 
 def show():

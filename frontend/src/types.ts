@@ -16,7 +16,7 @@ export interface InfisicalConfiguration {
 export interface Draft { link: string; text: string; request_id: string }
 export interface ServiceStatus {
   user?: string; loaded?: boolean; state: string; reported_at?: number; control_verified?: boolean; detail?: string;
-  workspace?: string; configuration?: string; database?: string;
+  workspace?: string; configuration?: string; database?: string; workspace_error?: string; executor?: string;
 }
 export interface Task {
   id: string; conversation_id: string; mode: View; source?: 'desktop' | 'telegram'; status: string; result?: string;

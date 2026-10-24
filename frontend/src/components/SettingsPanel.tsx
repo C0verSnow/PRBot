@@ -46,7 +46,7 @@ export function SettingsPanel({ open, onClose, busy, result, send }: Props) {
     if (!reply) return;
     setToken(reply.token); setDirty(!reply.applied);
     if (reply.applied) {
-      appliedToken.current = reply.token; setConfirmClose(false);
+      appliedToken.current = reply.token; setConfirmClose(configurationDirty && confirmClose);
       if (closeAfterUse) { setCloseAfterUse(false); onClose(); }
     }
     // Each result object is a completed native action; status polling retains its identity.
@@ -79,6 +79,7 @@ export function SettingsPanel({ open, onClose, busy, result, send }: Props) {
         {section === 'Workspace' && <section><h3 className="mb-7 text-lg font-medium">Workspace</h3>
           <div className="workspace-row"><div><h4>Working directory</h4><p>{result.status?.workspace || 'Not selected'}</p></div><button data-action="choose_workspace" className="secondary" disabled={busy} onClick={() => send('choose_workspace')}>Choose folder</button></div>
           <div className="workspace-row"><div><h4>Configuration directory</h4><p>{result.status?.configuration || 'Application configuration'}</p></div><button data-action="open_configuration" className="secondary" disabled={busy} onClick={() => send('open_configuration')}>Open folder</button></div>
+          {result.status?.workspace_error && <p role="alert" className="mt-3 text-xs text-red-700">{result.status.workspace_error}</p>}
           <div id="local-storage" className="mt-6 text-xs leading-6"><h4 className="font-medium">Local database</h4><p className="break-all">{result.status?.database || 'Loading database location…'}</p><p>Tasks, progress and synced messages are saved on this Mac. Cached history stays readable offline. Back up the database together with its -wal and -shm files while PRBot is closed.</p></div>
         </section>}
         {section === 'Connections' && <section><h3 className="mb-7 text-lg font-medium">Connections</h3><p className="mb-5 text-sm">Infisical: {result.connections?.infisical || 'Not connected'}{result.connections ? ` · ${result.connections.project}` : ''}</p>
@@ -109,7 +110,7 @@ export function SettingsPanel({ open, onClose, busy, result, send }: Props) {
           <div className="mt-16 text-center"><span aria-hidden="true" className="service-indicator" /><p className="mt-6 text-lg" aria-live="polite">{labels[state] || 'Unknown'}</p><p className="mt-3 text-xs text-muted">{state === 'running' ? 'Telegram is connected and listening.' : state === 'stale' ? 'The health report is out of date. Refresh status.' : 'Desktop tasks run independently of Telegram.'}</p><p className="mt-3 text-xs text-muted">Last report: {result.status?.reported_at ? new Date(result.status.reported_at * 1000).toLocaleTimeString('en-US') : 'Not available'}</p></div>
         </section>}
       </div></div>
-    <footer id="settings-feedback" role="status" className="border-t border-line px-6 py-4 text-xs leading-6">{result.message || 'Changes and connection feedback appear here.'}</footer>
-    {confirmClose && <div className="border-t border-line p-4" role="alert"><p>You have unsaved settings. Return to save them, or discard changes before closing.</p><div className="mt-3 flex gap-3">{dirty && !configurationDirty && <button className="secondary" disabled={busy} onClick={() => { setCloseAfterUse(true); send('use_id_token', { text: token }); }}>Use token</button>}<button className="secondary" disabled={busy} onClick={() => { setConfigurationDirty(false); setConfiguration(result.configuration ? { ...result.configuration.values, INFISICAL_CLIENT_SECRET: '' } : null); setDirty(false); setToken(appliedToken.current); setCloseAfterUse(false); setConfirmClose(false); onClose(); }}>Discard</button><button className="secondary" onClick={() => { setConfirmClose(false); setCloseAfterUse(false); }}>Cancel</button></div></div>}
+    <footer id="settings-feedback" role="status" className="border-t border-line px-6 py-4 text-xs leading-6">{result.message || (busy ? 'Operation in progress…' : 'Changes and connection feedback appear here.')}</footer>
+    {confirmClose && <div className="border-t border-line p-4" role="alert"><p>You have unsaved settings. Return to save them, or discard changes before closing.</p><div className="mt-3 flex gap-3">{dirty && <button className="secondary" disabled={busy || !token.trim()} onClick={() => { setCloseAfterUse(!configurationDirty); send('use_id_token', { text: token }); }}>Use token</button>}<button className="secondary" disabled={busy} onClick={() => { setConfigurationDirty(false); setConfiguration(result.configuration ? { ...result.configuration.values, INFISICAL_CLIENT_SECRET: '' } : null); setDirty(false); setToken(appliedToken.current); setCloseAfterUse(false); setConfirmClose(false); onClose(); }}>Discard</button><button className="secondary" onClick={() => { setConfirmClose(false); setCloseAfterUse(false); }}>Cancel</button></div></div>}
   </dialog>;
 }

@@ -51,6 +51,7 @@ export function HistoryBrowser({ result, send, busy, composer }: {
     if (acceptedId && acceptedId !== lastAccepted.current) load();
     lastAccepted.current = acceptedId;
   }, [acceptedId, load]);
+  // Saved session IDs are the original task IDs when a task exists in this journal.
   const selectedTask = (result.tasks || []).find(task => task.id === session);
   const privateTask = (result.tasks || []).filter(task => task.mode === 'Chat History' && task.source !== 'telegram')
     .sort((a, b) => b.created_at - a.created_at)[0];
@@ -75,7 +76,7 @@ export function HistoryBrowser({ result, send, busy, composer }: {
         </nav>
         <div aria-label="Saved messages" aria-busy={loading} className="min-w-0 space-y-3">
           {loading && <p role="status">Loading conversations…</p>}
-          {error && <div role="alert"><p>{error}</p><button className="secondary mt-2" onClick={() => load(cursor)}>Retry loading</button></div>}
+          {error && <div role="alert"><p>{error}</p><button className="secondary mt-2" onClick={() => { if (error === 'History changed. Refresh history.') { setMessages([]); setCursor('0'); load(); } else load(cursor); }}>Retry loading</button></div>}
           {warning && <p role="status" className="text-xs text-muted">{warning}</p>}
           {!loading && !error && messages.length === 0 && <p className="py-6 text-sm text-muted">No saved messages in this view. Choose another filter or start a task from Issue or Pull Request.</p>}
           {messages.map(message => <article key={`${message.conversation_id}:${message.message_id}`} className="history-message">

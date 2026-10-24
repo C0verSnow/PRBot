@@ -66,3 +66,12 @@ Chat History opens the saved conversation browser, with loading, empty and retry
 The desktop creates `~/Library/Application Support/PRBot/workbench.sqlite3` at startup, before cloud configuration is required. Settings → Workspace displays its full path. Tasks and events remain in this database; confirmed Redis messages and synchronized history also get a local SQLite copy. On connection failure, cached desktop messages remain readable with a warning. Without fresh cloud authorization, Telegram records stay hidden. Writes still require Redis confirmation; failed submissions remain retryable and are never labelled saved locally. Local copies are separated by Redis endpoint and retained across token rotation. Back up the application data directory and workspace together.
 
 See [Issue #15 implementation and remote validation](docs/Issue15-历史与存储.md).
+
+
+### Issue #17 故障恢复与输入保护
+
+桌面执行器异常后会等待并重试，窗口会显示重连提示。提交后继续修改输入，受理回包只清除未变的字段，新内容会保留。桥接请求一般 60 秒超时，启动服务 90 秒；超时只结束前台等待，不取消后台工作，请先查看任务再重试。文件夹对话框最多等待 45 秒；目录失效时 Settings → Workspace 保留原路径并提示重新选择。
+
+历史分页遇到 History changed 时，Retry loading 会重新加载首屏。成功轮询清除页面旧反馈，历史面板自己的加载错误仍保留到重试成功。Telegram 有待回答任务时，包含 GitHub 链接的新需求会提示使用 /FinishIssue，避免被当作答案；也可回复原通知或用 /answer 明确回答。工具提示不再混入 Issue 历史。Telegram 发送结果不明确时仍会重试，可能重复送达，这是保留的投递取舍。
+
+逐项核查与处理见[问题清单](问题清单.md)顶部，执行和远端验证记录见 [tasklist.md](tasklist.md)。

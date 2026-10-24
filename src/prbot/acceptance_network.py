@@ -1,9 +1,10 @@
 """Remote acceptance only: cut and restore a real HTTPS tunnel to Redis."""
 
 import asyncio
-import os
 from contextlib import asynccontextmanager
 from urllib.parse import urlsplit
+
+import httpx
 
 from prbot.conversation_store import ConversationStore
 
@@ -80,17 +81,8 @@ class GatedArchive(ConversationStore):
         super().__init__(values)
         self.gate = gate
 
-    async def command(self, *command):
-        # CI acceptance is sequential. Scope proxy settings to archive operations;
-        # SDK and Infisical traffic retain their normal network route.
-        overrides = {"HTTPS_PROXY": self.gate.proxy, "NO_PROXY": "", "no_proxy": ""}
-        previous = {key: os.environ.get(key) for key in overrides}
-        os.environ.update(overrides)
-        try:
-            return await super().command(*command)
-        finally:
-            for key, value in previous.items():
-                if value is None:
-                    os.environ.pop(key, None)
-                else:
-                    os.environ[key] = value
+    def http_client(self):
+        # Proxy only this client's Redis traffic; concurrent SDK/auth calls are untouched.
+        return httpx.AsyncClient(
+            timeout=20, follow_redirects=False, proxy=self.gate.proxy, trust_env=False
+        )

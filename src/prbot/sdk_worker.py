@@ -96,24 +96,19 @@ def _run():
                     sandbox=Sandbox.full_access,
                     approval_mode=ApprovalMode.deny_all,
                 )
-                sys.stdout.write(
-                    json.dumps(
-                        {
-                            "initialized": codex.metadata is not None,
-                            "thread_started": bool(thread.id),
-                        }
-                    )
-                )
+                emit({
+                    "type": "runtime", "initialized": codex.metadata is not None,
+                    "thread_started": bool(thread.id),
+                })
                 return
             if request["prompt"] == "__prbot_account_check__":
                 _stage = "account"
                 # Startup is a local account check, not a forced refresh/entitlement probe.
                 authenticated = codex.account(refresh_token=False).account is not None
-                sys.stdout.write(
-                    json.dumps(
-                        {"result": {"authenticated": authenticated}, "auth": auth.read_text()}
-                    )
-                )
+                emit({
+                    "type": "result", "result": {"authenticated": authenticated},
+                    "auth": auth.read_text(),
+                })
                 return
             _stage = "account"
             if codex.account().account is None:

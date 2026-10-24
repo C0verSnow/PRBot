@@ -195,7 +195,7 @@ class CodexAdapter:
                 raise worker_failure(out)
             response = json.loads(out.splitlines()[-1])
             if prompt == "__prbot_runtime_check__":
-                return response
+                return {key: response[key] for key in ("initialized", "thread_started")}
             if not isinstance(response, dict) or not isinstance(response.get("result"), dict):
                 raise ValueError
             updated = response["auth"]

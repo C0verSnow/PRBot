@@ -68,7 +68,8 @@ class Receiver:
             return
         if previous and previous[1] >= 5:
             raise ServiceHalted(
-                "Reply attempted 5 times. Review logs and the progress database before retrying."
+                f"Update {uid}: reply attempted 5 times. Review logs and the progress database "
+                "before retrying."
             )
         self.state.mark(uid, "processing")
         try:

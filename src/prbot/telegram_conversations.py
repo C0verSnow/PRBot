@@ -70,7 +70,7 @@ class TelegramConversations:
                     update.update_id,
                     scope,
                     "",
-                    "Issue",
+                    "",
                     json.dumps({"response": response}),
                     self.application.clean(message.text or ""),
                     created,
@@ -160,6 +160,13 @@ class TelegramConversations:
                         )
                     snapshot.update(task_id=selected, answer=snapshot.get("answer", text))
                 elif not command and not snapshot["session"] and waiting:
+                    if re.search(r"https://github\.com/", text, re.I):
+                        return await self.record_response(
+                            update,
+                            "To start a new task, send /FinishIssue, then resend this link and "
+                            "description. To answer a waiting task, reply to its notification "
+                            "or use /answer <task-id> <answer>.",
+                        )
                     if len(waiting) != 1:
                         return await self.record_response(
                             update,

@@ -297,7 +297,7 @@ def save_settings(values):
 class Config:
     token: str = field(repr=False)
     log_level: str = "INFO"
-    poll_timeout: int = 30
+    poll_timeout: int = 10
 
     @classmethod
     def load(cls):
