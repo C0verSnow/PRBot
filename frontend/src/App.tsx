@@ -75,7 +75,7 @@ export function App() {
   };
   const entries = new Map(sessions.map(item => [item.id, item]));
   for (const task of result.tasks || []) entries.set(task.id, { id: task.id, title: task.title || task.id, mode: task.mode, source: task.source || 'desktop', created_at: task.created_at });
-  for (const [id, item] of Object.entries(drafts)) if (!entries.has(id) && (item.link || item.text)) entries.set(id, { id, title: `Draft · ${item.text || item.link}`, mode: item.workspace === 'Chat History' ? 'Chat History' : 'Issue', source: 'desktop', created_at: 0 });
+  for (const [id, item] of Object.entries(drafts)) if (!entries.has(id) && (item.link || item.text)) entries.set(id, { id, title: `Draft · ${(item.text || item.link).slice(0, 120)}`, mode: item.workspace === 'Chat History' ? 'Chat History' : 'Issue', source: 'desktop', created_at: 0 });
   const sessionList = [...entries.values()].sort((a, b) => b.created_at - a.created_at);
   const optimistic = currentSubmitting ? submitted.current : null;
   return <div className="flex min-h-screen bg-canvas text-ink">
@@ -90,7 +90,7 @@ export function App() {
           submitted.current = { ...draft };
           // Every new submission has its own session/task identity. Continue task
           // answers use the existing task ID and saved conversation context.
-          if (selected !== draft.request_id) { setSelected(draft.request_id); setDrafts(previous => ({ ...previous, [draft.request_id]: draft })); }
+          if (selected !== draft.request_id) { setSelected(draft.request_id); setDrafts(previous => ({ ...previous, [selected]: fresh(view), [draft.request_id]: draft })); }
           send('submit_message', { ...draft, mode: view });
         }} />
         <p className="mt-3 text-xs text-muted">Send starts an independent session. Use Continue task to answer Codex. New keeps background tasks running. History numbers count unread task state updates, at most one per session.</p>
