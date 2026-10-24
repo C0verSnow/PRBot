@@ -328,7 +328,7 @@ def show(check_output=None):
                             feedback = (
                                 "Stop requested. Waiting for SDK process cleanup."
                                 if task["status"] == "cancelling"
-                                else "Task status refreshed. Cancelled queued tasks will not execute."
+                                else "Task refreshed. Cancelled queued tasks will not execute."
                             )
                         elif action == "answer":
                             extra["accepted"] = asyncio.run(

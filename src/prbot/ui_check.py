@@ -260,23 +260,27 @@ true;
   assert(field('history-sessions').hidden, 'History did not collapse');
   field('history-toggle').click(); await tick();
   document.querySelector(`[data-session="${first.id}"]`).click(); await tick();
-  assert(!document.querySelector('.activity-count'), 'Viewing session did not acknowledge activity');
+  assert(!document.querySelector('.activity-count'),
+    'Viewing session did not acknowledge activity');
   assert(field('send').getAttribute('aria-label') === 'Stop task' && !field('send').disabled);
   field('send').click(); field('send').click(); await tick();
   assert(requests.filter(item => item.action === 'cancel_task').length === 1, 'Duplicate stop');
-  assert(requests.find(item => item.action === 'cancel_task').task_id === first.id, 'Wrong stop ID');
+  assert(requests.find(item => item.action === 'cancel_task').task_id === first.id,
+    'Wrong stop ID');
   first.status = 'cancelling'; first.changed_at = 2;
   complete('cancel_task',{tasks:[{...first}]}); await tick();
   assert(field('send').getAttribute('aria-label') === 'Stopping…' && field('send').disabled,
     'Stop acknowledgement presented as terminal');
   first.status = 'cancelled'; first.changed_at = 3;
   window.receiveNative({ok:true,tasks:[{...first}]}); await tick();
-  assert(field('send').getAttribute('aria-label') === 'Send', 'Terminal state did not restore send');
+  assert(field('send').getAttribute('aria-label') === 'Send',
+    'Terminal state did not restore send');
   field('new-session').click(); await tick();
   edit(field('target-link'),'https://github.com/owner/repo'); edit(field('draft'),'keep me');
   await tick(); field('cancel-draft').click(); await tick();
   assert(document.querySelector('[role="alertdialog"]'), 'Draft loss has no confirmation');
-  [...document.querySelectorAll('button')].find(button => button.textContent === 'Keep editing').click();
+  [...document.querySelectorAll('button')]
+    .find(button => button.textContent === 'Keep editing').click();
   await tick(); assert(field('draft').value === 'keep me');
   field('cancel-draft').click(); await tick(); field('confirm-cancel').click(); await tick();
   assert(field('draft').value === '' && field('target-link').value === '', 'Cancel did not clear');
