@@ -253,7 +253,8 @@ true;
   assert(field('draft').value === '' && field('target-link').value === '');
   const first = {id:retry.request_id,mode:'Pull Request',source:'desktop',status:'queued',
     conversation_id:retry.request_id,created_at:1,changed_at:1,user_text:'fix',title:'fix',events:[]};
-  complete('submit_message',{accepted:{...first},tasks:[{...first}]}); await tick();
+  complete('submit_message',{accepted:{...first},tasks:[{...first}]});
+  await tick();
   assert(!document.querySelector('[data-state="queued"]'), 'Late acceptance changed session');
   assert(document.querySelector('.activity-count').textContent === '1', 'Missing actual activity');
   field('history-toggle').click(); await tick();
@@ -329,7 +330,8 @@ true;
   await select('Workspace');
   assert(performance.now() - switchStart < 500, 'Settings navigation blocked by connections');
   const pendingConnection = window.__slowConnection;
-  window.receiveNative({ok:true,completed_action:'connections',bridge_id:pendingConnection.bridge_id,
+  window.receiveNative({ok:true,completed_action:'connections',
+    bridge_id:pendingConnection.bridge_id,
     connections:{id_token:'refreshed-token',infisical:'Connected',project:'fixture'}});
   await tick(); await select('Connections');
   assert(field('id-token').value === 'unsaved-connection-draft',
