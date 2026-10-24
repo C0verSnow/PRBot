@@ -80,7 +80,8 @@ export function HistoryBrowser({ result, send, busy, composer }: {
           {!loading && !error && messages.length === 0 && <p className="py-6 text-sm text-muted">No saved messages in this view. Choose another filter or start a task from Issue or Pull Request.</p>}
           {messages.map(message => <article key={`${message.conversation_id}:${message.message_id}`} className="history-message">
             <p className="mb-2 text-xs text-muted">{message.role === 'assistant' ? 'Codex' : 'You'} · {message.source === 'telegram' ? 'Telegram' : 'Desktop'} · {message.mode === 'Chat History' ? 'Private chat' : message.mode} · {new Date(message.sequence * 1000).toLocaleString()}</p>
-            <TaskResult content={message.content} send={send} busy={busy} />
+            {message.role === 'assistant' ? <TaskResult content={message.content} send={send} busy={busy} />
+              : <p className="whitespace-pre-wrap break-words text-sm leading-7">{message.content}</p>}
           </article>)}
           {cursor !== '0' && <button className="secondary" disabled={loading} onClick={() => load(cursor)}>Load more messages</button>}
           {selectedTask && <TaskFeed key={selectedTask.id} task={selectedTask} send={send} busy={busy} history archived={hasResult(selectedTask.id, selectedTask.result)} />}

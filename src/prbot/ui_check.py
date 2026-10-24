@@ -514,7 +514,7 @@ true;
   assert(history.textContent.includes('Telegram') && history.textContent.includes('Choose new PR5'),
     'Telegram history missing');
   assert(history.querySelectorAll('.history-message').length === 2, 'Missing message cards');
-  assert(history.querySelector('.whitespace-pre-wrap').textContent.includes('\\n'),
+  assert(history.querySelector('.history-message .whitespace-pre-wrap').textContent.includes('\\n'),
     'Multiline message content lost');
   assert(history.textContent.includes('Continuing original task')
     && !history.textContent.includes('"summary"'), 'Serialized result leaked into history');
