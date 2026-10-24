@@ -81,7 +81,14 @@ def worker_failure(output):
         code = kind if kind != "failure" else stage
         if code not in {"dependencies", "runtime", "auth", "initialize"} and kind == "failure":
             code = "failure"
-        return SDKFailure(code, stage, name)
+        failure = SDKFailure(code, stage, name)
+        failure.file_target = error.get("file_target", "unspecified")
+        failure.origin = error.get("origin", "other")
+        if failure.file_target not in {"runtime", "workspace", "other", "unspecified"}:
+            failure.file_target = "other"
+        if failure.origin not in {"process_launch", "sdk_client", "other"}:
+            failure.origin = "other"
+        return failure
     except (ValueError, TypeError, KeyError, IndexError):
         return SDKFailure("failure", "worker", "ProcessExit")
 

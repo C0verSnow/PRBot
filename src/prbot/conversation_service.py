@@ -515,6 +515,11 @@ class ConversationService:
                 diagnostic.update(
                     error_code=error.code, stage=error.stage, exception_type=error.exception_type
                 )
+                if error.exception_type == "FileNotFoundError":
+                    diagnostic.update(
+                        file_target=getattr(error, "file_target", "unspecified"),
+                        origin=getattr(error, "origin", "other"),
+                    )
                 result = json.dumps(diagnostic)
             self.change(tid, "save_pending", result)
             if archive_ready:

@@ -22,6 +22,8 @@ def private_home(request):
 
 
 _stage = "dependencies"
+_runtime_path = None
+_workspace_path = None
 
 
 def emit(event):
@@ -46,15 +48,17 @@ def safe_text(text, request):
 
 
 def _run():
-    global _stage
+    global _stage, _runtime_path, _workspace_path
     from codex_cli_bin import bundled_codex_path
     from openai_codex import ApprovalMode, Codex, CodexConfig, Sandbox
 
     _stage = "request"
     request = json.loads(sys.stdin.readline())
     workspace = Path(request["path"]).resolve()
+    _workspace_path = str(workspace)
     _stage = "runtime"
     runtime = str(bundled_codex_path().resolve())
+    _runtime_path = runtime
     if not os.access(runtime, os.X_OK):
         raise PermissionError("Runtime unavailable")
     with private_home(request) as private:
@@ -222,7 +226,27 @@ def run():
             kind = "timeout"
         elif "connection" in message or "network" in message:
             kind = "network"
-        sys.stdout.write(json.dumps({"error": {"stage": _stage, "type": name, "kind": kind}}))
+        metadata = {"stage": _stage, "type": name, "kind": kind}
+        if isinstance(error, FileNotFoundError):
+            metadata["file_target"] = (
+                "unspecified"
+                if error.filename is None
+                else "runtime"
+                if error.filename == _runtime_path
+                else "workspace"
+                if error.filename == _workspace_path
+                else "other"
+            )
+            metadata["origin"] = "other"
+            trace = error.__traceback__
+            while trace:
+                module = trace.tb_frame.f_globals.get("__name__")
+                if module == "subprocess":
+                    metadata["origin"] = "process_launch"
+                elif module == "openai_codex.client":
+                    metadata["origin"] = "sdk_client"
+                trace = trace.tb_next
+        sys.stdout.write(json.dumps({"error": metadata}))
         raise SystemExit(1) from None
 
 
