@@ -2,8 +2,12 @@
 
 import sqlite3
 from contextlib import contextmanager
+from threading import Lock
 
 from prbot.paths import data_dir
+
+_initialized = set()
+_initialization_lock = Lock()
 
 
 @contextmanager
@@ -23,6 +27,18 @@ def journal_db():
 
 
 def initialize_journal():
+    # A fresh credential lookup need not repeat schema DDL on every UI poll.
+    path = data_dir() / "workbench.sqlite3"
+    with _initialization_lock:
+        identity = (path, path.stat().st_ino) if path.exists() else None
+        if identity in _initialized:
+            return path
+        _create_schema()
+        _initialized.add((path, path.stat().st_ino))
+    return path
+
+
+def _create_schema():
     with journal_db() as db:
         db.executescript("""
                 CREATE TABLE IF NOT EXISTS requests (
@@ -55,4 +71,3 @@ def initialize_journal():
             CREATE TABLE IF NOT EXISTS history_settings (
                 key TEXT PRIMARY KEY, value TEXT);
         """)
-    return data_dir() / "workbench.sqlite3"

@@ -294,3 +294,16 @@ def test_json_escaped_credentials_are_redacted_before_archive(app):
     app.values["SERVICE_TOKEN"] = secret
     encoded = app.clean(json.dumps({"summary": "value: " + secret}))
     assert json.loads(encoded)["summary"] == "value: [REDACTED]"
+
+
+@pytest.mark.parametrize("value", ["abc", "0", "-1"])
+async def test_invalid_task_timeout_names_configuration_key(app, value):
+    app.values["PRBOT_TASK_TIMEOUT"] = value
+    await app.submit(
+        "timeout-test", "local:me", "desktop", "Issue", "https://github.com/o/r", "Fix"
+    )
+    await app.execute(app.request("timeout-test"))
+    row = app.request("timeout-test")
+    assert row["status"] == "failed"
+    assert "PRBOT_TASK_TIMEOUT" in json.loads(row["result"])["summary"]
+    app.adapter.invoke.assert_not_awaited()

@@ -271,10 +271,38 @@ true;
       delivery:{code:'completed_by_codex',pr:'open',issue:'closed',ci:'failed'}});
     const task = {id:submitted[1].request_id,mode:'Issue',status:'delivered_unverified',
       conversation_id:'ui',created_at:1,result:report};
+    edit(field('draft'), 'new text typed while submitting'); await tick();
     window.receiveNative({ok:true,busy:false,completed_action:'submit_message',accepted:task,tasks:[task]});
     await tick();
+    assert(field('draft').value === 'new text typed while submitting',
+      'Accepted submission erased new input');
+    edit(field('target-link'), 'https://github.com/owner/repo'); await tick();
+    field('composer').requestSubmit(); await tick();
+    const nextSubmit = requests.filter(request => request.action === 'submit_message').at(-1);
+    assert(nextSubmit.request_id !== task.id, 'New draft reused accepted request ID');
+    const nextTask = {...task, id:nextSubmit.request_id};
+    window.receiveNative({ok:true,completed_action:'submit_message',bridge_id:nextSubmit.bridge_id,
+      accepted:nextTask,tasks:[nextTask]});
     await waitFor(() => field('draft').value === '');
-    assert(field('draft').value === '', 'Accepted submission did not clear draft');
+    assert(field('draft').value === '', 'Unchanged accepted draft did not clear');
+    window.receiveNative({ok:false,message:'temporary failure'}); await tick();
+    window.receiveNative({ok:true,message:null,completed_action:'tasks'}); await tick();
+    assert(!field('feedback').textContent, 'Successful polling retained old error');
+    edit(field('target-link'), 'https://github.com/owner/repo');
+    edit(field('draft'), 'timeout draft'); await tick();
+    field('composer').requestSubmit(); await tick();
+    const expired = requests.filter(request => request.action === 'submit_message').at(-1);
+    const originalNow = Date.now;
+    const advancedNow = originalNow() + 61000;
+    try {
+      Date.now = () => advancedNow;
+      await new Promise(resolve => setTimeout(resolve, 3200));
+      assert(field('send').textContent === 'Send', 'Timed out request held busy lock');
+      assert(field('draft').value === 'timeout draft', 'Timeout lost draft');
+    } finally { Date.now = originalNow; }
+    window.receiveNative({ok:true,completed_action:'submit_message',bridge_id:expired.bridge_id,
+      accepted:{...task,id:expired.request_id},tasks:[]}); await tick();
+    assert(field('draft').value === 'timeout draft', 'Late timed-out response cleared draft');
     assert(document.querySelector('[aria-label="Task status"]').textContent.includes(
       'Delivered · verification incomplete'), 'Delivery is hidden by generic failure');
     const facts = document.querySelector('[aria-label="Delivery facts"]').textContent;
@@ -547,7 +575,18 @@ true;
   await tick(); assert(history.querySelector('[role="alert"]'), 'Missing history failure state');
   [...history.querySelectorAll('button')]
     .find(button => button.textContent === 'Retry loading').click();
-  await tick(); respondHistory({sessions:[],messages:[]}); await tick();
+  await tick(); respondHistory({messages:[],cursor:'lost-anchor'}); await tick();
+  [...history.querySelectorAll('button')]
+    .find(button => button.textContent === 'Load more messages').click(); await tick();
+  const changedRequest = latestHistory();
+  window.receiveNative({ok:false,completed_action:'history',bridge_id:changedRequest.bridge_id,
+    history_error:{request_id:changedRequest.request_id,
+      message:'History changed. Refresh history.'}});
+  await tick();
+  [...history.querySelectorAll('button')]
+    .find(button => button.textContent === 'Retry loading').click(); await tick();
+  assert(latestHistory().cursor === '0', 'Retry reused missing history anchor');
+  respondHistory({sessions:[],messages:[]}); await tick();
   assert(history.textContent.includes('No saved messages'), 'Missing empty history guidance');
   [...history.querySelectorAll('button')]
     .find(button => button.textContent === 'New private chat').click();

@@ -439,3 +439,23 @@ async def test_desktop_cannot_answer_a_visible_telegram_task(app):
     assert app.visible_tasks("local:me")[0]["status"] == "needs_clarification"
     with pytest.raises(ConfigError):
         await app.answer("telegram-task", "desktop-reply", "local:me", "desktop", "Unauthorized")
+
+
+async def test_github_link_never_becomes_implicit_answer(app, update):
+    flow = TelegramConversations(app)
+    await create(flow, update)
+    await app.execute(app.request("telegram:10"))
+    reply = await flow.handle_async(update("https://github.com/o/r/issues/99 New task", uid=50))
+    assert "send /FinishIssue" in reply
+    assert app.request("telegram:10")["status"] == "needs_clarification"
+    assert not app.continuation(app.request("telegram:10"))["answers"]
+    assert app.request("telegram:50") is None
+
+
+async def test_utility_responses_do_not_enter_issue_history(app, update):
+    flow = TelegramConversations(app)
+    await flow.record_response(update("/id", uid=51), "User ID: 123")
+    messages = [call.args[0] for call in app.archive.save.await_args_list]
+    assert all(message["mode"] == "" for message in messages)
+    app.archive.messages.return_value = messages
+    assert not (await app.desktop_history("local:me", "Issue"))["messages"]

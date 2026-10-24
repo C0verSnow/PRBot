@@ -7,15 +7,20 @@ export function useNativeBridge() {
   const [submitting, setSubmitting] = useState(false);
   const pending = useRef(new Map<Action, number>());
   const serial = useRef(0);
+  const deadlines = useRef(new Map<Action, { expires: number; request_id?: string }>());
   const tasksRevision = useRef(0);
   const queuedHistory = useRef<RequestData | null>(null);
   const active = useRef<Action | null>(null);
   const send = useCallback<SendAction>((action, data = {}) => {
     if (pending.current.has(action)) {
       if (action === 'history') queuedHistory.current = data;
+      if (!background.has(action)) setResult(previous => ({ ...previous, ok: false, message: 'Another operation is in progress. Please wait.' }));
       return;
     }
-    if (!background.has(action) && active.current) return;
+    if (!background.has(action) && active.current) {
+      setResult(previous => ({ ...previous, ok: false, message: 'Another operation is in progress. Please wait.' }));
+      return;
+    }
     const handler = window.webkit?.messageHandlers.prbot;
     if (!handler) {
       setResult(previous => ({ ...previous, ok: false, message: 'Open PRBot for macOS to use this feature.' }));
@@ -23,13 +28,16 @@ export function useNativeBridge() {
     }
     const bridge_id = ++serial.current;
     pending.current.set(action, bridge_id);
+    deadlines.current.set(action, { expires: Date.now() + (action === 'start_service' ? 90000 : 60000), request_id: data.request_id });
     if (!background.has(action)) {
       active.current = action; setBusy(true);
       setSubmitting(action === 'submit_message' || action === 'answer');
+      if (action === 'choose_workspace' || action === 'start_service') setResult(previous => ({ ...previous, ok: true, message: action === 'choose_workspace' ? 'Choose a folder in the macOS dialog (45 second limit)…' : 'Checking Telegram and starting service…' }));
     }
     try { handler.postMessage({ action, ...data, bridge_id }); }
     catch {
       pending.current.delete(action);
+      deadlines.current.delete(action);
       if (active.current === action) { active.current = null; setBusy(false); setSubmitting(false); }
       setResult(previous => ({ ...previous, ok: false, message: 'Request could not be sent. Retry.' }));
     }
@@ -44,10 +52,12 @@ export function useNativeBridge() {
         else tasksRevision.current = payload.tasks_revision;
       }
       if (payload.status) lastReport = Date.now();
-      if (action) pending.current.delete(action);
+      if (action) { pending.current.delete(action); deadlines.current.delete(action); }
       if (action === active.current) { active.current = null; setBusy(false); setSubmitting(false); }
       setResult(previous => {
         const next = { ...previous };
+        // A successful completion clears prior feedback even when native sends null.
+        if (action && payload.ok) { next.ok = true; next.message = payload.message ?? null; }
         for (const [key, value] of Object.entries(payload)) {
           if (['busy', 'completed_action', 'bridge_id', 'tasks_revision'].includes(key) || value == null) continue;
           if (key === 'ok' && !payload.message) continue;
@@ -67,6 +77,17 @@ export function useNativeBridge() {
     window.receiveNative = receive;
     send('ready');
     const timer = window.setInterval(() => {
+      for (const [action, deadline] of deadlines.current) {
+        if (Date.now() < deadline.expires) continue;
+        deadlines.current.delete(action); pending.current.delete(action);
+        if (active.current === action) { active.current = null; setBusy(false); setSubmitting(false); }
+        const message = 'Request timed out. Check task status before retrying.';
+        setResult(previous => ({ ...previous, ok: false, message,
+          ...(action === 'history' ? { history_error: { request_id: deadline.request_id, message } } : {}) }));
+        if (action === 'history' && queuedHistory.current) {
+          const data = queuedHistory.current; queuedHistory.current = null; send('history', data);
+        }
+      }
       if (Date.now() - lastReport > 15000) setResult(previous => previous.status?.state === 'stale' ? previous : ({ ...previous,
         status: { ...previous.status, state: 'stale' } }));
       send('ready');

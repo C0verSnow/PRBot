@@ -8,19 +8,9 @@ from prbot.codex_adapter import CodexAdapter
 from prbot.github import DeliveryError, GitHub
 
 
-async def test_github_uncertain_pr_reconciled():
-    calls = []
-
+async def test_github_request_redacts_uncertain_network_error():
     def transport(request):
-        calls.append(request.method)
-        if request.method == "POST":
-            raise httpx.ReadTimeout("uncertain")
-        prs = (
-            []
-            if len(calls) == 1
-            else [{"state": "open", "html_url": "https://github.com/o/r/pull/1"}]
-        )
-        return httpx.Response(200, json=prs)
+        raise httpx.ReadTimeout("private URL and credentials")
 
     gh = GitHub("test")
     await gh.client.aclose()
@@ -28,27 +18,9 @@ async def test_github_uncertain_pr_reconciled():
         base_url="https://api.github.com", transport=httpx.MockTransport(transport)
     )
     try:
-        result = await gh.pull_request(
-            {
-                "repo": "o/r",
-                "branch": "feature/task",
-                "id": "1",
-                "repository": {"default_branch": "main"},
-            },
-            "body",
-        )
-        assert result["html_url"].endswith("/1")
-        assert calls == ["GET", "POST", "GET"]
-    finally:
-        await gh.close()
-
-
-async def test_issue_close_failure_checked():
-    gh = GitHub("test")
-    gh.request = AsyncMock(side_effect=[{"state": "open"}, DeliveryError("no"), {"state": "open"}])
-    try:
-        with pytest.raises(DeliveryError):
-            await gh.close_issue("o/r", 3)
+        with pytest.raises(DeliveryError, match="GitHub request unconfirmed") as error:
+            await gh.request("GET", "/repos/o/r")
+        assert "private" not in str(error.value)
     finally:
         await gh.close()
 

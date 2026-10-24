@@ -16,13 +16,22 @@ export function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [current, setCurrent] = useState<Partial<Record<View, string>>>({});
   const accepted = useRef('');
+  const submitted = useRef<Partial<Record<View, Draft>>>({});
   useEffect(() => {
     const task = result.accepted;
     if (task) {
       setCurrent(previous => previous[task.mode] === task.id ? previous : ({ ...previous, [task.mode]: task.id }));
       if (task.id !== accepted.current) {
         accepted.current = task.id;
-        setDrafts(previous => previous[task.mode].request_id === task.id ? { ...previous, [task.mode]: fresh() } : previous);
+        setDrafts(previous => {
+          const draft = previous[task.mode];
+          const sent = submitted.current[task.mode];
+          if (draft.request_id !== task.id || !sent || sent.request_id !== task.id) return previous;
+          return { ...previous, [task.mode]: {
+            ...fresh(), link: draft.link === sent.link ? '' : draft.link,
+            text: draft.text === sent.text ? '' : draft.text,
+          } };
+        });
       }
     }
   }, [result.accepted]);
@@ -34,8 +43,13 @@ export function App() {
   const tasks = (result.tasks || []).filter(task => task.mode === view)
     .sort((a, b) => b.created_at - a.created_at);
   const selectedTask = tasks.find(task => task.id === current[view]) || tasks[0];
+  useEffect(() => {
+    if (view !== 'Chat History' && selectedTask && current[view] !== selectedTask.id) {
+      setCurrent(previous => ({ ...previous, [view]: selectedTask.id }));
+    }
+  }, [view, selectedTask?.id, current]);
   const taskFeed = selectedTask && <TaskFeed key={selectedTask.id} task={selectedTask} busy={busy} send={send} />;
-  const composer = <Composer mode={view} draft={drafts[view]} onChange={draft => setDrafts(previous => ({ ...previous, [view]: draft }))} busy={busy} submitting={submitting} onSend={() => send('submit_message', { ...drafts[view], mode: view })} />;
+  const composer = <Composer mode={view} draft={drafts[view]} onChange={draft => setDrafts(previous => ({ ...previous, [view]: draft }))} busy={busy} submitting={submitting} onSend={() => { submitted.current[view] = { ...drafts[view] }; send('submit_message', { ...drafts[view], mode: view }); }} />;
   return <div className="flex min-h-screen bg-canvas text-ink">
     <Sidebar active={view} onSelect={setView} onSettings={() => setSettingsOpen(true)} user={result.status?.user || 'Local user'} />
     <main className="h-screen min-w-0 flex-1 overflow-y-auto"><header className="flex h-[76px] items-center justify-between px-7"><span className="text-xs text-muted">{view === 'Chat History' ? 'Conversations' : `${view} workspace`}</span><button id="status-button" className="secondary" onClick={() => setSettingsOpen(true)}><span id="service-label">{serviceLabel(result.status)}</span></button></header>
@@ -47,7 +61,8 @@ export function App() {
           {composer}
           <p className="mt-3 text-xs text-muted">Send starts a new task. Use Continue task above to answer a waiting task. Previous messages are in Chat History.</p>
         </>}
-        <p id="feedback" role="status" className={`mt-5 text-xs leading-6 ${result.ok ? 'text-muted' : 'text-red-700'}`}>{result.message}</p>
+        {result.status?.executor === 'reconnecting' && <p role="status" className="mt-3 text-xs text-red-700">Desktop task execution was interrupted. Retrying…</p>}
+        <p id="feedback" role="status" className={`mt-5 text-xs leading-6 ${result.ok ? 'text-muted' : 'text-red-700'}`}>{result.message || (busy && !submitting ? 'Operation in progress…' : '')}</p>
       </div></main>
     <SettingsPanel open={settingsOpen} onClose={() => setSettingsOpen(false)} busy={busy} result={result} send={send} />
   </div>;

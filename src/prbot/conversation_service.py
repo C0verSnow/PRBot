@@ -92,7 +92,8 @@ class ConversationService:
         except ConfigError:
             return cls(archive=LocalHistoryArchive(), values={})
 
-    def clean(self, text):
+    def cleaner(self):
+        """Snapshot credentials once per read, without a long-lived auth cache."""
         values = dict(self.values)
         sensitive = list(self.runtime_secrets)
         try:
@@ -125,9 +126,17 @@ class ConversationService:
                 json.dumps(value, ensure_ascii=True)[1:-1],
             )
         }
-        for value in sorted(variants, key=len, reverse=True):
-            text = text.replace(value, "[REDACTED]")
-        return redact(text, secrets)
+        ordered = sorted(variants, key=len, reverse=True)
+
+        def clean(text):
+            for value in ordered:
+                text = text.replace(value, "[REDACTED]")
+            return redact(text, secrets)
+
+        return clean
+
+    def clean(self, text):
+        return self.cleaner()(text)
 
     @staticmethod
     def conversation(actor, source, mode):
@@ -282,6 +291,7 @@ class ConversationService:
         remote_modes = {m.get("task_id"): m["mode"] for m in all_messages if m.get("mode")}
         modes = remote_modes | modes
         messages = []
+        clean = self.cleaner()
         for message in all_messages:
             source, owner = message.get("source"), message.get("actor_id", "")
             parts = owner.split(":")
@@ -305,7 +315,7 @@ class ConversationService:
                 )
             if message_mode and (mode == "All" or message_mode == mode):
                 message["mode"] = message_mode
-                message["content"] = self.clean(message.get("content", ""))
+                message["content"] = clean(message.get("content", ""))
                 messages.append(message)
         sessions = {}
         for message in messages:
@@ -472,10 +482,14 @@ class ConversationService:
         suffix = ":" + str(round_number) if round_number else ""
         try:
             result = json.loads(row["result"])
+            if not isinstance(result, dict) or result.get("outcome") not in {
+                "completed", "needs_clarification", "failed", "delivered_unverified"
+            }:
+                raise ValueError
         except (ValueError, TypeError):
             result = {
                 "summary": row["result"] or "Interrupted. Review repository state.",
-                "outcome": row["status"],
+                "outcome": "failed",
                 "pr_url": "",
                 "validation": "Not passed",
             }
@@ -627,9 +641,15 @@ class ConversationService:
 
                 adapter.on_event = on_event
             self.event(tid, "status", "Codex started.")
-            result = await adapter.invoke(
-                path, prompt, RESULT_SCHEMA, int(self.values.get("PRBOT_TASK_TIMEOUT", 3600))
-            )
+            try:
+                timeout = int(self.values.get("PRBOT_TASK_TIMEOUT", 3600))
+                if timeout <= 0:
+                    raise ValueError
+            except (ValueError, TypeError):
+                raise ConfigError(
+                    "PRBOT_TASK_TIMEOUT must be a positive number of seconds."
+                ) from None
+            result = await adapter.invoke(path, prompt, RESULT_SCHEMA, timeout)
             if (
                 not self.adapter
                 and payload["kind"] != "chat"

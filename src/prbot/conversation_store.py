@@ -37,7 +37,9 @@ class ConversationStore:
         self.scope = hashlib.sha256(self.url.encode()).hexdigest()
         with journal_db() as db:
             db.execute(
-                "INSERT OR REPLACE INTO history_settings VALUES ('last_scope', ?)",
+                "INSERT INTO history_settings VALUES ('last_scope', ?) "
+                "ON CONFLICT(key) DO UPDATE SET value=excluded.value "
+                "WHERE value != excluded.value",
                 (self.scope,),
             )
 
@@ -58,9 +60,12 @@ class ConversationStore:
             m["sequence"], m.get("logical_order", 0), m["message_id"]
         ))
 
+    def http_client(self):
+        return httpx.AsyncClient(timeout=20, follow_redirects=False)
+
     async def command(self, *command):
         try:
-            async with httpx.AsyncClient(timeout=20, follow_redirects=False) as client:
+            async with self.http_client() as client:
                 response = await client.post(
                     self.url,
                     json=list(command),

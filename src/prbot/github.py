@@ -1,6 +1,4 @@
-"""GitHub operations: reconcile before retrying externally visible writes."""
-
-import asyncio
+"""Read GitHub delivery facts; repository writes belong to the SDK."""
 
 import httpx
 
@@ -40,49 +38,6 @@ class GitHub:
                 "GitHub request unconfirmed. Check network, sign-in and repository access."
             ) from None
 
-    async def repository(self, repo):
-        result = await self.request("GET", f"/repos/{repo}")
-        if (
-            result.get("archived")
-            or result.get("disabled")
-            or not result.get("permissions", {}).get("push")
-        ):
-            raise DeliveryError(
-                "Repository is not writable. Check archive state and write permissions."
-            )
-        # Read the API surfaces needed for subsequent writes before executing any code task.
-        await self.request("GET", f"/repos/{repo}/pulls", params={"per_page": 1})
-        await self.request("GET", f"/repos/{repo}/issues", params={"per_page": 1})
-        return {k: result[k] for k in ("full_name", "default_branch", "html_url", "updated_at")}
-
-    async def pull_request(self, task, body):
-        repo, branch = task["repo"], task["branch"]
-        params = {"head": repo.split("/")[0] + ":" + branch, "state": "all"}
-        existing = await self.request("GET", f"/repos/{repo}/pulls", params=params)
-        if existing:
-            if existing[0]["state"] != "open":
-                raise DeliveryError(
-                    "The task PR is closed. Review it manually; no duplicate PR was created."
-                )
-            return existing[0]
-        try:
-            return await self.request(
-                "POST",
-                f"/repos/{repo}/pulls",
-                json={
-                    "title": f"PRBot task {task['id']}",
-                    "head": branch,
-                    "base": task["repository"]["default_branch"],
-                    "body": body,
-                    "draft": True,
-                },
-            )
-        except DeliveryError:
-            existing = await self.request("GET", f"/repos/{repo}/pulls", params=params)
-            if existing:
-                return existing[0]
-            raise
-
     async def checks(self, repo, sha, required):
         checks = await self.request(
             "GET",
@@ -117,46 +72,3 @@ class GitHub:
         ):
             raise CheckFailure("Required remote checks failed. Open the PR Checks tab.")
         return all(values.get(k) == "success" for k in required)
-
-    async def ready(self, repo, number, expected_sha=None):
-        pr = await self.request("GET", f"/repos/{repo}/pulls/{number}")
-        if expected_sha and pr["head"]["sha"] != expected_sha:
-            raise DeliveryError("PR head changed. Revalidate before marking complete.")
-        if not pr["draft"]:
-            return
-        try:
-            result = await self.request(
-                "POST",
-                "/graphql",
-                json={
-                    "query": "mutation($id:ID!){markPullRequestReadyForReview("
-                    "input:{pullRequestId:$id})"
-                    "{pullRequest{id isDraft}}}",
-                    "variables": {"id": pr["node_id"]},
-                },
-            )
-            if result.get("errors"):
-                raise DeliveryError(
-                    "Unable to mark PR ready. Check pull request write permissions."
-                )
-        except DeliveryError:
-            current = await self.request("GET", f"/repos/{repo}/pulls/{number}")
-            if current["draft"]:
-                raise
-
-    async def close_issue(self, repo, number):
-        path = f"/repos/{repo}/issues/{number}"
-        current = await self.request("GET", path)
-        if current["state"] == "closed":
-            return "Closed (verified remotely)"
-        try:
-            await self.request("PATCH", path, json={"state": "closed", "state_reason": "completed"})
-        except DeliveryError:
-            if (await self.request("GET", path))["state"] != "closed":
-                raise
-        return "Closed"
-
-    async def wait_checks(self, task, required, timeout):
-        async with asyncio.timeout(timeout):
-            while not await self.checks(task["repo"], task["commit_sha"], required):
-                await asyncio.sleep(15)
