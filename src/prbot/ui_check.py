@@ -545,6 +545,18 @@ true;
   window.receiveNative({ok:false,completed_action:'answer',bridge_id:reply.bridge_id,
     message:'Fixture: waiting for your answer'}); await tick();
   assert(field('answer-ui-waiting-task').value === 'Use feature/ui', 'Failed reply lost draft');
+  const remoteTask = {...fixtureTask, id:'ui-telegram-task', source:'telegram', created_at:2};
+  window.receiveNative({ok:true,tasks:[fixtureTask,remoteTask],tasks_revision:999999999});
+  await tick();
+  assert(!field('answer-ui-telegram-task'), 'Desktop can answer another Telegram identity');
+  assert(document.querySelector('[aria-label="Task status"]').textContent.includes(
+    'Reply to this task in Telegram'), 'Missing Telegram reply guidance');
+  const currentTask = document.querySelector('[aria-label="Current task"]');
+  currentTask.value = fixtureTask.id;
+  currentTask.dispatchEvent(new Event('change', {bubbles:true})); await tick();
+  assert(document.querySelector('.task-status').textContent.includes(fixtureTask.id),
+    'Current task selection does not drive Codex status');
+  window.receiveNative({ok:true,tasks:[fixtureTask],tasks_revision:999999999}); await tick();
   document.querySelector('main').scrollTop = document.querySelector('main').scrollHeight;
   field('user').focus();
   assert(document.activeElement.id === 'user', 'Dialog did not restore focus');

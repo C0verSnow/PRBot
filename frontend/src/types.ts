@@ -17,7 +17,7 @@ export interface ServiceStatus {
   workspace?: string; configuration?: string;
 }
 export interface Task {
-  id: string; conversation_id: string; mode: View; status: string; result?: string;
+  id: string; conversation_id: string; mode: View; source?: 'desktop' | 'telegram'; status: string; result?: string;
   created_at: number;
   events?: { sequence: number; kind: string; text: string; created: number }[];
 }

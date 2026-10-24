@@ -26,12 +26,13 @@ export function TaskFeed({ task, send, busy, archived = false, history = false }
       {!history && task.events?.map(event => <p key={event.sequence} className="whitespace-pre-wrap break-words text-xs leading-6 text-muted"><time>{new Date(event.created * 1000).toLocaleTimeString()}</time> · {event.text}</p>)}
       {task.result && !archived && <TaskResult content={task.result} send={send} busy={busy} />}
     </div>
-    {task.status === 'needs_clarification' && <form className="mt-4" onSubmit={event => {
+    {task.status === 'needs_clarification' && task.source === 'telegram' && <p className="mt-3 text-sm">Reply to this task in Telegram to continue.</p>}
+    {task.status === 'needs_clarification' && task.source !== 'telegram' && <form className="mt-4" onSubmit={event => {
       event.preventDefault(); if (answer.trim() && !busy) send('answer', { task_id: task.id, request_id: replyId.current, text: answer });
     }}><label className="block text-sm" htmlFor={`answer-${task.id}`}>Answer Codex to continue this task</label>
       <textarea id={`answer-${task.id}`} value={answer} maxLength={12000} onChange={event => setAnswer(event.target.value)} className="my-2 min-h-20 w-full rounded-lg border border-line p-3" />
       <button className="secondary" disabled={busy || !answer.trim()}>Continue task</button>
     </form>}
-    {task.status === 'save_pending' && <button className="secondary mt-3" disabled={busy} onClick={() => send('retry_save', { text: task.id })}>Message not saved. Retry.</button>}
+    {task.status === 'save_pending' && task.source !== 'telegram' && <button className="secondary mt-3" disabled={busy} onClick={() => send('retry_save', { text: task.id })}>Message not saved. Retry.</button>}
   </article>;
 }

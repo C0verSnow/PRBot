@@ -325,7 +325,7 @@ def show(check_output=None):
                         import time
 
                         extra["tasks_revision"] = time.monotonic()
-                        extra["tasks"] = app_service.tasks(actor)
+                        extra["tasks"] = app_service.visible_tasks(actor)
                     AppHelper.callAfter(finish, feedback, True, extra)
                 except ConfigError as error:
                     AppHelper.callAfter(finish, str(error), False, {})

@@ -247,6 +247,7 @@ class ConversationService:
             "id": row["id"],
             "conversation_id": row["conversation"],
             "mode": row["mode"],
+            "source": row["source"],
             "status": row["status"],
             "result": row["result"],
             "created_at": row["created"],
@@ -260,6 +261,22 @@ class ConversationService:
                 (actor, source),
             ).fetchall()
             return [self.public(row) for row in rows]
+
+    def visible_tasks(self, actor):
+        """Read-only Telegram visibility uses server-side bindings, like history."""
+        from prbot.telegram_auth import actor_ids
+
+        allowed = actor_ids(self.values.get("PRBOT_TELEGRAM_ACTOR_ID", ""))
+        tasks = self.tasks(actor)
+        with self.db() as db:
+            rows = db.execute(
+                "SELECT * FROM requests WHERE source='telegram' ORDER BY created DESC"
+            ).fetchall()
+        for row in rows:
+            parts = row["actor"].split(":")
+            if len(parts) == 3 and parts[1] in allowed:
+                tasks.append(self.public(row))
+        return sorted(tasks, key=lambda task: task["created_at"], reverse=True)[:100]
 
     async def desktop_history(self, actor, mode, cursor="0", count=50):
         from prbot.telegram_auth import actor_ids

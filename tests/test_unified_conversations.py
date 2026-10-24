@@ -402,3 +402,40 @@ async def test_legacy_telegram_records_without_mode_remain_readable(app):
     assert page["messages"][0]["content"] == "Legacy archived dialogue"
     assert page["messages"][0]["task_id"] == "telegram:old"
     assert not (await app.desktop_history("local:me", "Issue"))["messages"]
+
+
+def test_visible_telegram_task_status_uses_bound_actor_and_stays_read_only(app):
+    now = 1700000000
+    with app.db() as db:
+        for tid, actor in [("visible-task", "123:123:0"), ("foreign-task", "123:999:0")]:
+            db.execute(
+                "INSERT INTO requests VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                (
+                    tid,
+                    actor,
+                    "telegram",
+                    "Issue",
+                    "conversation",
+                    "running",
+                    "{}",
+                    None,
+                    None,
+                    now,
+                    now,
+                ),
+            )
+    tasks = app.visible_tasks("local:me")
+    assert [task["id"] for task in tasks] == ["visible-task"]
+    assert tasks[0]["source"] == "telegram" and tasks[0]["status"] == "running"
+    app.values["PRBOT_TELEGRAM_ACTOR_ID"] = ""
+    assert not app.visible_tasks("local:me")
+
+
+async def test_desktop_cannot_answer_a_visible_telegram_task(app):
+    await app.submit(
+        "telegram-task", "123:123:0", "telegram", "Issue", "https://github.com/o/r", "Fix"
+    )
+    await app.execute(app.request("telegram-task"))
+    assert app.visible_tasks("local:me")[0]["status"] == "needs_clarification"
+    with pytest.raises(ConfigError):
+        await app.answer("telegram-task", "desktop-reply", "local:me", "desktop", "Unauthorized")
