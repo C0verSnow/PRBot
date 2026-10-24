@@ -18,7 +18,14 @@ running → cancelling → 取消执行协程 → CodexAdapter finally 对该 wo
 
 ## 验证
 
-本地只进行源码阅读、Python AST 静态解析和 git diff --check。没有运行本地编译、构建、测试或冒烟脚本。远端 [Actions 40111468396](https://github.com/C0verSnow/PRBot/actions/runs/40111468396) 在 6a20901 上通过 TypeScript 检查、前端构建、pip check、Ruff、273 项 Python 测试与源代码真实 WebKit 检查（含 1120×760 / 760×580 截图）。该次记录之后进一步清理了从历史会话发送时旧草稿的重复副本，并限制草稿标题长度；最终提交和 DMG 验证结果以 [PR #20](https://github.com/C0verSnow/PRBot/pull/20) 的最新 Checks 为准。真实提供商/模型验收未运行，OS 进程回收测试使用假 worker，不消耗模型调用。
+本地只进行源码阅读、Python AST 静态解析和 git diff --check。没有运行本地编译、构建、测试或冒烟脚本。最终功能代码 `d01d0d14622ec1a69fbee30035fa71c0ec02436a` 的 [Actions 40111691362](https://github.com/C0verSnow/PRBot/actions/runs/40111691362) 全部必需检查通过：TypeScript、前端构建、pip check、Ruff、273 项 Python 测试、源码和打包后的真实 WebKit 交互、1120×760 / 760×580 双尺寸截图、DMG 校验和挂载复制、内置运行时验证。两份界面验收 JSON 均为 `ok: true`。
+
+- [源码界面证据](https://github.com/C0verSnow/PRBot/actions/runs/40111691362/artifacts/12567031700)
+- [打包界面证据](https://github.com/C0verSnow/PRBot/actions/runs/40111691362/artifacts/12567255561)
+- [DMG 与 SHA256SUMS](https://github.com/C0verSnow/PRBot/actions/runs/40111691362/artifacts/12567275528)
+- [PR #20](https://github.com/C0verSnow/PRBot/pull/20)：保持打开供审查；[Issue #19](https://github.com/C0verSnow/PRBot/issues/19) 已在验收后按用户要求关闭。文档收尾提交后的检查以 PR 最新 Checks 为准。
+
+真实提供商/模型验收未运行，OS 进程回收测试使用假 worker，不消耗模型调用。
 
 新增 tests/test_workspace_lifecycle.py 覆盖统一链接识别、独立会话、授权和重复取消、排队任务不再执行、运行取消等待清理、完成/取消竞态、归档失败重试、真实 OS worker/子进程回收和旧历史恢复。现有 ui-check 更新为在真实 WebKit 验证统一入口、New/Cancel、折叠侧栏、数字标记和 Send/Stop 生命周期，同时保留设置和窗口尺寸检查。
 
