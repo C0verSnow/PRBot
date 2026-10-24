@@ -291,12 +291,12 @@ class ConversationService:
             # Legacy per-update task IDs can be reconciled from the execution journal.
             message["task_id"] = routes.get(message.get("task_id"), message.get("task_id"))
             message_mode = modes.get(message.get("task_id"), message.get("mode"))
-            if not message_mode and source == "desktop":
+            if not message_mode:
                 message_mode = next(
                     (
                         m
                         for m in ("Issue", "Pull Request", "Chat History")
-                        if self.conversation(actor, "desktop", m) == message.get("conversation_id")
+                        if self.conversation(owner, source, m) == message.get("conversation_id")
                     ),
                     None,
                 )

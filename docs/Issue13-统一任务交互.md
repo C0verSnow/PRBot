@@ -60,3 +60,30 @@ Settings 初始焦点放到标题，关闭按钮保留 focus-visible 和键盘�
 本地只做 Python AST 语法阅读检查与 git diff --check；未运行本地测试、构建或编译。系统 Python 没有预装 ruff，后续用独立二进制执行静态检查。完整单元测试、TypeScript 检查、前端构建、真实 WKWebView 焦点/消息流/状态检查及 DMG 安装验收交由现有 GitHub Actions。
 
 首次远端 CI 40058305329 的 215 个测试、Ruff、TypeScript/Vite 已通过，WKWebView 小窗口留白断言失败（截图中弹窗左侧仅约 9px）。宽度限制改用包含块百分比，保留原断言。补充检查选择提示和 /id 回复归档、旧通知轮次拒绝及授权缓存独立性。新增 acceptance_telegram.py，使用 Telegram Update 样本、真实 Redis 和真实 SDK 验证创建→澄清→回答→原任务继续→桌面读取历史；不调用真实 Telegram sendMessage。
+
+## 真实提供商验收
+
+[远程验收 40064639370](https://github.com/C0verSnow/PRBot/actions/runs/40064639370) 对后端提交 `a2d1054fb20c01447331cb86355476e44693a8b6` 完整通过 test、dmg、acceptance：220 个测试、Ruff、TypeScript/Vite、源码和安装版 WKWebView、DMG 挂载复制、签名与内嵌 SDK 检查。脱敏结果见 [provider-evidence.json](evidence/issue-13/provider-evidence.json)。
+
+真实 Infisical/Redis/SDK 验收确认主机文件写入和命令、任务幂等、重启历史、真实澄清与回答、Redis 断网恢复且不重跑 SDK；新增 Telegram 适配器测试确认原任务收到回答、重复回答幂等、完整 10 条创建与澄清消息可在桌面读取。该测试使用合成 Telegram Update 与临时授权 Actor，不向真实聊天发消息，也没有修改 Infisical 中的生产授权列表；动态授权新增/撤销/失败/限流由确定性的回归覆盖。
+
+后续仅调整状态指示器紧邻输入框的位置，并补旧 Telegram 消息缺少 mode 时按会话哈希读取的兼容回归；没有更改 SDK 执行或提供商凭据机制。最终提交的完整 221 项测试及安装版位置断言，以 PR #14 最新 Checks 为准，不能把前一提交的 220 项结果冒充为新测试已通过。
+
+## 最终代码位置
+
+行号对应本次交付的代码；完整提交 SHA 记录于 PR #14。定位基准的完整 SHA 和修改前范围见本文开头。
+
+| 需求 | 修改位置与调用关系 | 影响和验证 |
+| --- | --- | --- |
+| FR-01 | frontend/src/App.tsx 35–42、57–75：历史合并、会话选择、消息流；frontend/src/components/TaskFeed.tsx 4–37：复用结果渲染，历史中不重复事件 | 历史刷新、分页、结果去重；远程 WKWebView 断言 |
+| FR-02 | src/prbot/conversation_store.py history 61–86、messages 88–116；src/prbot/conversation_service.py desktop_history 264–329；src/prbot/telegram_conversations.py archive_update 22–58、record_response 60–85 | v1 兼容、先排序后分页、Actor 隔离；重启、同秒乱序、写失败回归 |
+| FR-03 | src/prbot/telegram_auth.py actor_ids 10–14、allows 28–46 → src/prbot/secrets.py load_secrets；handle_async 87–209 校验身份后才路由 | 多 ID、新增/撤销、失败拒绝、请求合并；旧任务配置不改变授权缓存 |
+| FR-04 | src/prbot/telegram_conversations.py handle_async 87–209、process 211–265、send_results 268–343 → ConversationService.answer 352–426 → execute 495–668 | 同任务继续、多任务选择、通知轮次、持久化回答预留；src/prbot/acceptance_telegram.py check_telegram 21–131 |
+| FR-05 | frontend/src/components/SettingsPanel.tsx 16–35、75–76：标题初始焦点与原触发器恢复；frontend/src/style.css 30、47–59：小窗口留白、focus-visible | 真实 WKWebView 首次打开、关闭恢复、小窗口滚动；不移除全局焦点提示 |
+| FR-06 | frontend/src/App.tsx 47–58、72–75 → frontend/src/components/TaskStatus.tsx 2–14；frontend/src/components/SettingsPanel.tsx 108 改静态连接图标 | 当前任务真实状态位于输入区上方，轮询沿用 2 秒，动画支持减少动态效果 |
+
+测试实现集中于 `tests/test_unified_conversations.py`；原有 tasks、interactions、receiver 等回归保留。
+
+状态紧邻输入框的源码窗口验收：提交 `c5be7d4935188d1c8269865b97320c0e1b0019a3` 的 [CI 40064879328](https://github.com/C0verSnow/PRBot/actions/runs/40064879328) 已通过该位置断言，结果见 [source-ui.json](evidence/issue-13/source-ui.json)。下图为远程真实 WKWebView 使用测试任务显示的界面，不是设计稿或真实用户记录。
+
+![Codex 状态紧邻输入框上方](images/issue13-task-status.png)

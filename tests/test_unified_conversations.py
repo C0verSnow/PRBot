@@ -381,3 +381,24 @@ async def test_malformed_answer_returns_archived_usage_and_does_not_halt_receive
     assert reply == "Use /answer <task-id> <answer>."
     assert app.archive.save.call_args.args[0]["role"] == "assistant"
     assert app.request("telegram:40") is None
+
+
+async def test_legacy_telegram_records_without_mode_remain_readable(app):
+    scope = "123:123:0"
+    app.archive.messages.return_value = [
+        {
+            "conversation_id": app.conversation(scope, "telegram", "Pull Request"),
+            "message_id": "telegram:old:user",
+            "task_id": "telegram:old",
+            "source": "telegram",
+            "actor_id": scope,
+            "role": "user",
+            "content": "Legacy archived dialogue",
+            "sequence": 1,
+            "created_at": 1,
+        }
+    ]
+    page = await app.desktop_history("local:me", "Pull Request")
+    assert page["messages"][0]["content"] == "Legacy archived dialogue"
+    assert page["messages"][0]["task_id"] == "telegram:old"
+    assert not (await app.desktop_history("local:me", "Issue"))["messages"]
