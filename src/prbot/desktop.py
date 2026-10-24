@@ -314,10 +314,11 @@ def show(check_output=None):
                             mode = request.get("mode")
                             if mode not in {"Issue", "Pull Request", "Chat History"}:
                                 raise ConfigError("Choose a task mode.")
-                            cid = app_service.conversation(actor, "desktop", mode)
                             extra["history"] = dict(
                                 asyncio.run(
-                                    app_service.archive.history(cid, request.get("cursor", "0"))
+                                    app_service.desktop_history(
+                                        actor, mode, request.get("cursor", "0")
+                                    )
                                 ),
                                 mode=mode,
                             )

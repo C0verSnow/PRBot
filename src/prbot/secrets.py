@@ -26,7 +26,7 @@ def bootstrap(configuration=None):
     return values
 
 
-def load_secrets(refresh=False, configuration=None):
+def load_secrets(refresh=False, configuration=None, timeout=20):
     global _cache, _expires, _cache_key
     with _lock:
         settings = bootstrap() if configuration is None else bootstrap(configuration)
@@ -41,7 +41,7 @@ def load_secrets(refresh=False, configuration=None):
         url = settings.get("INFISICAL_URL", "https://app.infisical.com").rstrip("/")
         validate_infisical_url(url)
         try:
-            with httpx.Client(base_url=url, timeout=20, follow_redirects=False) as client:
+            with httpx.Client(base_url=url, timeout=timeout, follow_redirects=False) as client:
                 response = client.post(
                     "/api/v1/auth/universal-auth/login",
                     json={

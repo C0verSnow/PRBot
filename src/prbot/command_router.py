@@ -28,7 +28,7 @@ class CommandRouter:
         name, target = match.groups()
         if target and target.lower() != self.username:
             return None
-        if name.lower() in {"finishissue", "cancel"}:
+        if name.lower() in {"finishissue", "cancel", "answer"}:
             if self.conversations:
                 return self.conversations.handle(update, name.lower())
             return "Repository tasks are unavailable. Check Infisical and Codex sign-in."
@@ -49,7 +49,7 @@ class CommandRouter:
             name, target = match.groups()
             if target and target.lower() != self.username:
                 return None
-            if name.lower() in {"finishissue", "cancel"}:
+            if name.lower() in {"finishissue", "cancel", "answer"}:
                 return await self.conversations.handle_async(update, name.lower())
             return self.dispatch(update)
         return await self.conversations.handle_async(update)

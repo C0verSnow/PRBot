@@ -77,3 +77,33 @@ class ConversationStore:
             }
         except (ValueError, KeyError, TypeError, IndexError):
             raise ConfigError("History unavailable. Retry loading messages.") from None
+
+    async def messages(self):
+        """Read the bounded legacy hash, dedup, then sort before display pagination.
+
+        HSCAN cursors are storage cursors, not chronological pages. v1 records
+        remain readable; no destructive migration or expiry is required.
+        """
+        cursor = "0"
+        messages = {}
+        seen = set()
+        try:
+            while True:
+                page = await self.command("HSCAN", "prbot:history:v1", cursor, "COUNT", 1000)
+                cursor = str(page[0])
+                for field, encoded in zip(page[1][::2], page[1][1::2]):
+                    message = json.loads(encoded)
+                    if not isinstance(message, dict):
+                        raise ValueError
+                    messages[field] = message
+                if cursor == "0":
+                    break
+                if cursor in seen:
+                    raise ValueError
+                seen.add(cursor)
+            return sorted(
+                messages.values(),
+                key=lambda m: (m["sequence"], m.get("logical_order", 0), m["message_id"]),
+            )
+        except (ValueError, KeyError, TypeError, IndexError):
+            raise ConfigError("History unavailable. Retry loading messages.") from None

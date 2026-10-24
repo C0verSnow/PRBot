@@ -14,6 +14,8 @@ export function serviceLabel(status: NativeResult['status']) { return labels[sta
 interface Props { open: boolean; onClose: () => void; busy: boolean; result: NativeResult; send: SendAction }
 export function SettingsPanel({ open, onClose, busy, result, send }: Props) {
   const dialog = useRef<HTMLDialogElement>(null);
+  const trigger = useRef<HTMLElement | null>(null);
+  const heading = useRef<HTMLHeadingElement>(null);
   const [section, setSection] = useState<typeof sections[number]>('Workspace');
   const [token, setToken] = useState('');
   const [dirty, setDirty] = useState(false);
@@ -24,7 +26,13 @@ export function SettingsPanel({ open, onClose, busy, result, send }: Props) {
   const savingConfiguration = useRef(false);
   const [closeAfterUse, setCloseAfterUse] = useState(false);
   const [transition, setTransition] = useState('');
-  useEffect(() => { if (open && !dialog.current?.open) dialog.current?.showModal(); else if (!open) dialog.current?.close(); }, [open]);
+  useEffect(() => {
+    if (open && !dialog.current?.open) {
+      trigger.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+      dialog.current?.showModal();
+      heading.current?.focus({ preventScroll: true });
+    } else if (!open) dialog.current?.close();
+  }, [open]);
   useEffect(() => {
     if (result.connections) {
       appliedToken.current = result.connections.id_token;
@@ -64,8 +72,8 @@ export function SettingsPanel({ open, onClose, busy, result, send }: Props) {
     if (value === 'Connections' && !dirty && !result.connections) send('connections');
     if (value === 'Configuration' && !configurationDirty && !result.configuration) send('configuration');
   };
-  return <dialog ref={dialog} id="settings" aria-labelledby="settings-title" className="settings-dialog" onCancel={e => { e.preventDefault(); close(); }} onClose={() => { document.getElementById('user')?.focus(); onClose(); }}>
-    <header className="flex items-center justify-between border-b border-line px-6 py-5"><h2 id="settings-title" className="font-serif text-2xl">Settings</h2><button id="close-settings" aria-label="Close settings" className="close-settings" onClick={close}>×</button></header>
+  return <dialog ref={dialog} id="settings" aria-labelledby="settings-title" className="settings-dialog" onCancel={e => { e.preventDefault(); close(); }} onClose={() => { trigger.current?.focus({ preventScroll: true }); onClose(); }}>
+    <header className="flex items-center justify-between border-b border-line px-6 py-5"><h2 ref={heading} tabIndex={-1} autoFocus id="settings-title" className="font-serif text-2xl">Settings</h2><button id="close-settings" aria-label="Close settings" className="close-settings" onClick={close}>×</button></header>
     <div className="settings-body"><nav aria-label="Settings sections" className="settings-nav">{sections.map(value => <button key={value} data-section={value} className={`nav-item mb-1 ${section === value ? 'bg-[#eae8e2]' : ''}`} aria-current={section === value ? 'page' : undefined} onClick={() => choose(value)}>{value}</button>)}</nav>
       <div className="settings-content">
         {section === 'Workspace' && <section><h3 className="mb-7 text-lg font-medium">Workspace</h3>
@@ -97,7 +105,7 @@ export function SettingsPanel({ open, onClose, busy, result, send }: Props) {
           </form> : <button className="secondary" disabled={busy} onClick={() => send('configuration')}>Load configuration</button>}
         </section>}
         {section === 'Background Service' && <section className="relative min-h-[300px]"><h3 className="text-lg font-medium">Background Service</h3><button id="service-power" aria-label={powerLabel} disabled={busy || ['starting', 'stopping'].includes(state)} className="power-button" onClick={() => { if (uncertain) send('refresh_service'); else { setTransition(active ? 'stopping' : 'starting'); send(active ? 'stop_service' : 'start_service'); } }}>⏻</button>
-          <div className="mt-16 text-center"><div aria-hidden="true" className={`service-core ${state}`} /><p className="mt-6 text-lg" aria-live="polite">{labels[state] || 'Unknown'}</p><p className="mt-3 text-xs text-muted">{state === 'running' ? 'Telegram is connected and listening.' : state === 'stale' ? 'The health report is out of date. Refresh status.' : 'Desktop tasks run independently of Telegram.'}</p><p className="mt-3 text-xs text-muted">Last report: {result.status?.reported_at ? new Date(result.status.reported_at * 1000).toLocaleTimeString('en-US') : 'Not available'}</p></div>
+          <div className="mt-16 text-center"><span aria-hidden="true" className="service-indicator" /><p className="mt-6 text-lg" aria-live="polite">{labels[state] || 'Unknown'}</p><p className="mt-3 text-xs text-muted">{state === 'running' ? 'Telegram is connected and listening.' : state === 'stale' ? 'The health report is out of date. Refresh status.' : 'Desktop tasks run independently of Telegram.'}</p><p className="mt-3 text-xs text-muted">Last report: {result.status?.reported_at ? new Date(result.status.reported_at * 1000).toLocaleTimeString('en-US') : 'Not available'}</p></div>
         </section>}
       </div></div>
     <footer id="settings-feedback" role="status" className="border-t border-line px-6 py-4 text-xs leading-6">{result.message || 'Changes and connection feedback appear here.'}</footer>

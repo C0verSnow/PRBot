@@ -22,7 +22,7 @@ export interface Task {
   events?: { sequence: number; kind: string; text: string; created: number }[];
 }
 export interface Message {
-  message_id: string; content: string; role: string; sequence: number; task_id: string;
+  conversation_id?: string; source?: string; logical_order?: number; message_id: string; content: string; role: string; sequence: number; task_id: string;
 }
 export interface NativeResult {
   ok: boolean; bridge_id?: number; message?: string | null; busy?: boolean; completed_action?: Action; status?: ServiceStatus;
@@ -30,7 +30,7 @@ export interface NativeResult {
   id_token_result?: { token: string; applied: boolean };
   configuration?: InfisicalConfiguration;
   accepted?: Task; tasks?: Task[]; tasks_revision?: number;
-  history?: { mode: View; cursor: string; messages: Message[] };
+  history?: { reset?: boolean; mode: View; cursor: string; messages: Message[] };
 }
 export interface RequestData {
   bridge_id?: number; task_id?: string; text?: string; mode?: View; link?: string; request_id?: string; cursor?: string;

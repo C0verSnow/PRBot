@@ -49,3 +49,11 @@ input:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 3p
 .close-settings:active { background: #dedbd3; }
 .close-settings:focus-visible { outline: 2px solid #55544f; outline-offset: 2px; }
 .execution-feed { overflow-y: auto; max-height: 360px; overflow-anchor: none; }
+
+.task-core { flex: none; width: 32px; height: 32px; margin: 0; }
+.task-core.queued { border-style: dashed; }
+.task-core.needs_clarification { border-color: #a66c19; }
+.task-core.completed { border-color: #47804c; }
+.task-core.failed, .task-core.interrupted, .task-core.timed_out { border-color: #a74432; }
+.service-indicator { display: inline-block; width: 12px; height: 12px; border-radius: 50%; background: #86847d; }
+#settings-title:focus { outline: none; }
