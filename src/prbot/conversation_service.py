@@ -293,6 +293,10 @@ class ConversationService:
         messages = []
         clean = self.cleaner()
         for message in all_messages:
+            # New utility records have no task or mode. Legacy empty task IDs may
+            # still have Issue metadata and must not relabel these new records.
+            if message.get("mode") == "" and not message.get("task_id"):
+                continue
             source, owner = message.get("source"), message.get("actor_id", "")
             parts = owner.split(":")
             if not (

@@ -459,3 +459,8 @@ async def test_utility_responses_do_not_enter_issue_history(app, update):
     assert all(message["mode"] == "" for message in messages)
     app.archive.messages.return_value = messages
     assert not (await app.desktop_history("local:me", "Issue"))["messages"]
+    # Old utility records must not supply Issue metadata to newer empty-mode records.
+    legacy = dict(messages[0], mode="Issue", message_id="legacy")
+    app.archive.messages.return_value = [legacy, *messages]
+    page = await app.desktop_history("local:me", "Issue")
+    assert [message["message_id"] for message in page["messages"]] == ["legacy"]

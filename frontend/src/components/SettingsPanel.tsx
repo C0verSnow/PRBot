@@ -46,9 +46,8 @@ export function SettingsPanel({ open, onClose, busy, result, send }: Props) {
     if (!reply) return;
     setToken(reply.token); setDirty(!reply.applied);
     if (reply.applied) {
-      appliedToken.current = reply.token; setConfirmClose(false);
+      appliedToken.current = reply.token; setConfirmClose(configurationDirty && confirmClose);
       if (closeAfterUse) { setCloseAfterUse(false); onClose(); }
-      else if (configurationDirty) setConfirmClose(true);
     }
     // Each result object is a completed native action; status polling retains its identity.
     // eslint-disable-next-line react-hooks/exhaustive-deps
