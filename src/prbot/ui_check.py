@@ -494,7 +494,8 @@ true;
   assert(history, 'Missing independent Chat History');
   assert(!field('composer'), 'History opens with an unrelated question box');
   assert(history.textContent.includes('Loading conversations'), 'Missing loading state');
-  const latestHistory = () => historyRequests.filter(request => request.action === 'history').at(-1);
+  const latestHistory = () => historyRequests
+    .filter(request => request.action === 'history').at(-1);
   assert(latestHistory().mode === 'All', 'History does not default to all conversations');
   const savedSessions = [{id:'remote-task',title:'Choose new PR5',mode:'Issue',
     source:'telegram',created_at:2}, {id:'other-task',title:'Review pull request',
@@ -522,7 +523,8 @@ true;
   sessionButton.click(); await tick();
   assert(latestHistory().session === 'remote-task', 'Session not filtered by backend');
   respondHistory({messages:[],cursor:'next-page'}); await tick();
-  [...history.querySelectorAll('button')].find(button => button.textContent === 'Load more messages').click();
+  [...history.querySelectorAll('button')]
+    .find(button => button.textContent === 'Load more messages').click();
   await tick();
   assert(latestHistory().cursor === 'next-page', 'History cursor not sent');
   respondHistory({reset:false,messages:[{conversation_id:'remote',message_id:'three',
@@ -534,17 +536,22 @@ true;
   await tick();
   assert(latestHistory().mode === 'Pull Request' && latestHistory().session === '',
     'Switching history mode kept an invisible session filter');
-  respondHistory({messages:[{message_id:'stale',content:'Must not appear',sequence:1}]},staleRequest);
+  respondHistory({messages:[{message_id:'stale',content:'Must not appear',sequence:1}]},
+    staleRequest);
   await tick(); assert(!history.textContent.includes('Must not appear'), 'Stale history won race');
   const failedRequest = latestHistory();
   window.receiveNative({ok:false,completed_action:'history',bridge_id:failedRequest.bridge_id,
-    history_error:{request_id:failedRequest.request_id,message:'History unavailable. Retry loading messages.'}});
+    history_error:{request_id:failedRequest.request_id,
+      message:'History unavailable. Retry loading messages.'}});
   await tick(); assert(history.querySelector('[role="alert"]'), 'Missing history failure state');
-  [...history.querySelectorAll('button')].find(button => button.textContent === 'Retry loading').click();
+  [...history.querySelectorAll('button')]
+    .find(button => button.textContent === 'Retry loading').click();
   await tick(); respondHistory({sessions:[],messages:[]}); await tick();
   assert(history.textContent.includes('No saved messages'), 'Missing empty history guidance');
-  [...history.querySelectorAll('button')].find(button => button.textContent === 'New private chat').click();
-  await tick(); assert(field('composer') && !field('target-link'), 'Private chat entry unavailable');
+  [...history.querySelectorAll('button')]
+    .find(button => button.textContent === 'New private chat').click();
+  await tick();
+  assert(field('composer') && !field('target-link'), 'Private chat entry unavailable');
   handler.postMessage = originalPost;
   document.querySelector('[data-view="Issue"]').click(); await tick();
   field('user').focus();
