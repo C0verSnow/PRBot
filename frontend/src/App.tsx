@@ -3,6 +3,7 @@ import { useNativeBridge } from './bridge';
 import { Sidebar } from './components/Sidebar';
 import { Composer } from './components/Composer';
 import { TaskResult } from './components/TaskResult';
+import { TaskStatus } from './components/TaskStatus';
 import { TaskFeed } from './components/TaskFeed';
 import { EmptyState } from './components/EmptyState';
 import { SettingsPanel, serviceLabel } from './components/SettingsPanel';
@@ -35,8 +36,8 @@ export function App() {
     const page = result.history;
     if (page) {
       setHistories(previous => ({ ...previous, [page.mode]: Array.from(new Map(
-        [...previous[page.mode], ...page.messages].map(message => [message.message_id, message])
-      ).values()).sort((a, b) => a.sequence - b.sequence) }));
+        [...(page.reset ? [] : previous[page.mode]), ...page.messages].map(message => [`${message.conversation_id}:${message.message_id}`, message])
+      ).values()).sort((a, b) => a.sequence - b.sequence || (a.logical_order || 0) - (b.logical_order || 0) || a.message_id.localeCompare(b.message_id)) }));
       setCursors(previous => ({ ...previous, [page.mode]: page.cursor }));
     }
   }, [result.history]);
@@ -53,6 +54,9 @@ export function App() {
     ? task.mode === historyMode && (!session || task.id === session)
     : task.mode === view && (task.id === current[view] || ['running', 'queued', 'needs_clarification', 'save_pending', 'interrupted'].includes(task.status))
   ).sort((a, b) => a.created_at - b.created_at);
+  const selectedId = view === 'Chat History' ? session : current[view];
+  const selectedTask = tasks.find(task => task.id === selectedId) || tasks[tasks.length - 1];
+  const sessions = Array.from(new Set([...historyTasks.map(task => task.id), ...histories[historyMode].map(message => message.task_id).filter(Boolean)]));
   const messages = histories[historyMode].filter(message => !session || message.task_id === session);
   return <div className="flex min-h-screen bg-canvas text-ink">
     <Sidebar active={view} onSelect={setView} onSettings={() => setSettingsOpen(true)} user={result.status?.user || 'Local user'} />
@@ -60,13 +64,16 @@ export function App() {
       <div className="mx-auto max-w-[760px] px-6 pb-8"><EmptyState view={view} />
         {view === 'Chat History' && <section aria-label="Conversation history" className="mb-6 space-y-3">
           <div className="flex flex-wrap gap-3"><label>History for <select aria-label="History workspace" value={historyMode} onChange={event => { setHistoryMode(event.target.value as View); setSession(''); }}>{views.map(mode => <option key={mode}>{mode}</option>)}</select></label>
-            <label>Session <select aria-label="History session" value={session} onChange={event => setSession(event.target.value)}><option value="">All sessions</option>{historyTasks.map(task => <option key={task.id} value={task.id}>{new Date(task.created_at * 1000).toLocaleString()} · {task.status}</option>)}</select></label>
+            <label>Session <select aria-label="History session" value={session} onChange={event => setSession(event.target.value)}><option value="">All sessions</option>{sessions.map(id => <option key={id} value={id}>{id}</option>)}</select></label>
             <button className="secondary" onClick={() => send('history', { mode: historyMode })}>Refresh history</button></div>
-          {messages.map(message => <article key={message.message_id} className="rounded-xl border border-line p-4"><p className="mb-2 text-xs text-muted">{message.role === 'user' ? 'You' : 'Codex'} · {new Date(message.sequence * 1000).toLocaleString()}</p>{message.role === 'assistant' ? <TaskResult content={message.content} send={send} busy={busy} /> : <p className="whitespace-pre-wrap break-words text-sm leading-7">{message.content}</p>}</article>)}
+          {messages.map(message => <article key={`${message.conversation_id}:${message.message_id}`} className="message-row py-4"><p className="mb-2 text-xs text-muted">{message.role === 'user' ? 'You' : 'Assistant'}{message.source === 'telegram' ? ' · Telegram' : ''} · {new Date(message.sequence * 1000).toLocaleString()}</p>{message.role === 'assistant' ? <TaskResult content={message.content} send={send} busy={busy} /> : <p className="whitespace-pre-wrap break-words text-sm leading-7">{message.content}</p>}</article>)}
           {cursors[historyMode] !== '0' && <button className="secondary" onClick={() => send('history', { mode: historyMode, cursor: cursors[historyMode] })}>Load more messages</button>}
         </section>}
+        <section aria-label="Task status" className="mb-6 space-y-3">{tasks.map(task => <TaskFeed key={task.id} task={task} busy={busy} send={send} history={view === 'Chat History'} archived={view === 'Chat History' && messages.some(message => message.role === 'assistant' && message.task_id === task.id && message.content === task.result)} />)}</section>
+        {view !== 'Chat History' && tasks.length > 1 && <label className="block text-xs text-muted">Current task <select aria-label="Current task" value={selectedTask?.id || ''} onChange={event => setCurrent(previous => ({ ...previous, [view]: event.target.value }))}>{tasks.map(task => <option key={task.id} value={task.id}>{task.id} · {task.status}</option>)}</select></label>}
+        <TaskStatus task={selectedTask} />
         <Composer mode={view} draft={drafts[view]} onChange={draft => setDrafts(previous => ({ ...previous, [view]: draft }))} busy={busy} submitting={submitting} onSend={() => send('submit_message', { ...drafts[view], mode: view })} />
-        <section aria-label="Task status" aria-live="polite" className="mt-6 space-y-3">{tasks.map(task => <TaskFeed key={task.id} task={task} busy={busy} send={send} archived={view === 'Chat History' && messages.some(message => message.role === 'assistant' && message.task_id === task.id && message.content === task.result)} />)}</section>
+
         <p id="feedback" role="status" className={`mt-5 text-xs leading-6 ${result.ok ? 'text-muted' : 'text-red-700'}`}>{result.message}</p>
         {!result.ok && view === 'Chat History' && <button className="secondary mt-2" onClick={() => send('history', { mode: historyMode })}>Retry loading history</button>}
       </div></main>

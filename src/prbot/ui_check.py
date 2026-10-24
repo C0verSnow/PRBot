@@ -71,7 +71,8 @@ window.__uiCheckResult = 'pending';
   document.getElementById('user').click();
   await new Promise(resolve => setTimeout(resolve, 80));
   const bounds = document.getElementById('settings').getBoundingClientRect();
-  assert(bounds.left >= 15 && bounds.right <= innerWidth - 15, 'Minimum settings width');
+  assert(bounds.left >= 15 && bounds.right <= innerWidth - 15,
+    `Minimum settings width: left=${bounds.left} right=${bounds.right} viewport=${innerWidth}`);
   assert(bounds.top >= 15 && bounds.bottom <= innerHeight - 15, 'Minimum settings height');
   for (const button of document.querySelectorAll('.workspace-row button')) {
     const rect = button.getBoundingClientRect();
@@ -284,6 +285,9 @@ true;
   document.getElementById('user').click();
   await tick();
   assert(document.getElementById('settings').open);
+  assert(document.activeElement.id === 'settings-title', 'Close button received initial focus');
+  assert(!document.getElementById('close-settings').matches(':focus-visible'),
+    'Close button highlighted');
   assert(document.querySelectorAll('[data-section]').length === 4);
   assert(document.querySelectorAll('.workspace-row').length === 2);
   const buttons = Array.from(document.querySelectorAll('.workspace-row button'));
@@ -465,7 +469,8 @@ true;
   await select('Background Service');
   await tick();
   assert(document.querySelectorAll('#service-power').length === 1);
-  assert(document.querySelector('.service-core'));
+  assert(document.querySelector('.service-indicator'));
+  assert(!document.querySelector('#settings .service-core'), 'Telegram still animates');
   window.receiveNative({ok:true, status:{state:'stale',loaded:true}});
   await tick();
   assert(document.getElementById('service-power').getAttribute('aria-label') === 'Refresh status');
@@ -476,14 +481,30 @@ true;
   assert(!document.getElementById('settings').open);
   await nativePaste(field('draft'));
   const statusArea = document.querySelector('[aria-label="Task status"]');
-  assert(field('composer').compareDocumentPosition(statusArea)
-    & Node.DOCUMENT_POSITION_FOLLOWING, 'Execution feedback is above composer');
+  assert(statusArea.compareDocumentPosition(field('composer'))
+    & Node.DOCUMENT_POSITION_FOLLOWING, 'Execution feedback is below composer');
+  assert(document.querySelector('.task-status').nextElementSibling === field('composer'),
+    'Codex status must sit immediately above the composer');
   assert(!document.querySelector('[aria-label="Conversation history"]'),
     'History leaked into Issue workspace');
   document.querySelector('[data-view="Chat History"]').click(); await tick();
   assert(document.querySelector('[aria-label="Conversation history"]'),
     'Missing independent Chat History');
   assert(!field('target-link'), 'Private chat requires a GitHub link');
+  window.receiveNative({ok:true,history:{mode:'Chat History',cursor:'0',reset:true,messages:[
+    {conversation_id:'remote',message_id:'one',task_id:'remote-task',source:'telegram',
+      role:'user',content:'Choose new PR5',sequence:1},
+    {conversation_id:'remote',message_id:'two',task_id:'remote-task',source:'telegram',
+      role:'assistant',content:JSON.stringify({summary:'Continuing original task',
+        validation:'',pr_url:''}),sequence:2}
+  ]}}); await tick();
+  const history = document.querySelector('[aria-label="Conversation history"]');
+  assert(history.textContent.includes('Telegram') && history.textContent.includes('Choose new PR5'),
+    'Telegram history missing');
+  assert(!history.querySelector('article.border'), 'History still uses bordered cards');
+  assert(history.textContent.includes('Continuing original task')
+    && !history.textContent.includes('"summary"'),
+    'Serialized result leaked into history');
   document.querySelector('[data-view="Issue"]').click(); await tick();
   field('user').focus();
   // Keep a deterministic fixture visible for scroll, answer-routing and screenshot evidence.
@@ -497,6 +518,8 @@ true;
       text:'Reviewed repository context · step ' + index}))};
   window.receiveNative({ok:true,tasks:[JSON.parse(JSON.stringify(fixtureTask))],
     tasks_revision:999999999}); await tick();
+  assert(document.querySelector('.task-status').dataset.state === 'needs_clarification',
+    'Task animation is not driven by task state');
   const feed = document.querySelector('.execution-feed');
   feed.scrollTop = 0; feed.dispatchEvent(new Event('scroll')); await tick();
   field('draft').focus();
@@ -522,6 +545,18 @@ true;
   window.receiveNative({ok:false,completed_action:'answer',bridge_id:reply.bridge_id,
     message:'Fixture: waiting for your answer'}); await tick();
   assert(field('answer-ui-waiting-task').value === 'Use feature/ui', 'Failed reply lost draft');
+  const remoteTask = {...fixtureTask, id:'ui-telegram-task', source:'telegram', created_at:2};
+  window.receiveNative({ok:true,tasks:[fixtureTask,remoteTask],tasks_revision:999999999});
+  await tick();
+  assert(!field('answer-ui-telegram-task'), 'Desktop can answer another Telegram identity');
+  assert(document.querySelector('[aria-label="Task status"]').textContent.includes(
+    'Reply to this task in Telegram'), 'Missing Telegram reply guidance');
+  const currentTask = document.querySelector('[aria-label="Current task"]');
+  currentTask.value = fixtureTask.id;
+  currentTask.dispatchEvent(new Event('change', {bubbles:true})); await tick();
+  assert(document.querySelector('.task-status').textContent.includes(fixtureTask.id),
+    'Current task selection does not drive Codex status');
+  window.receiveNative({ok:true,tasks:[fixtureTask],tasks_revision:999999999}); await tick();
   document.querySelector('main').scrollTop = document.querySelector('main').scrollHeight;
   field('user').focus();
   assert(document.activeElement.id === 'user', 'Dialog did not restore focus');

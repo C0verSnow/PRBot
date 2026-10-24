@@ -177,11 +177,12 @@ async def test_bound_telegram_and_desktop_share_service_without_identity_bypass(
     flow = TelegramConversations(app)
     assert "not bound" in await flow.handle_async(update(), "finishissue")
     app.values["PRBOT_TELEGRAM_ACTOR_ID"] = "123"
+    flow = TelegramConversations(app)
     assert "Send a GitHub" in await flow.handle_async(update(), "finishissue")
     assert "Describe" in await flow.handle_async(update("https://github.com/o/r/pull/7", uid=11))
     reply = await flow.handle_async(update("Review and fix this pull request", uid=12))
     assert "accepted" in reply
-    row = app.request("telegram:12")
+    row = app.request("telegram:10")
     assert row["mode"] == "Pull Request"
     assert row["source"] == "telegram"
     assert row["conversation"] != app.conversation("local:me", "desktop", "Pull Request")

@@ -50,3 +50,10 @@ Real provider acceptance (Infisical, Upstash, paid SDK turn and GitHub delivery)
 Manually dispatch the existing CI workflow on the feature branch with `acceptance=true`. The repository must have access to the organization's six `INFISICAL_*` Actions secrets. The runner reads `PRBOT_ACCEPTANCE_CODEX_AUTH` (the complete test account `auth.json`) from that Infisical environment alongside its Redis settings. An explicit Actions `PRBOT_ACCEPTANCE_CODEX_AUTH` or legacy JSON `PRBOT_ACCEPTANCE_BOOTSTRAP` remains supported. No local Codex login is uploaded.
 
 Acceptance performs real SDK turns, checks a question survives reopening the service, submits an answer to the same task, and verifies that answer through an actual host file write. A CI-only HTTPS tunnel interrupts traffic to real Redis after SDK completion; the task must retain `save_pending`, then save and restore all four dialogue messages after reconnection without another SDK call. This checks client transport recovery, not a provider-wide outage or automatic UI connection monitoring. Only sanitized boolean evidence is uploaded; only this run's archive fields are removed.
+
+
+## Issue #13：统一聊天与任务继续
+
+Telegram 用 `/FinishIssue` 开始任务；收到澄清后回复通知，或发送 `/answer <task-id> <answer>`，会保留原任务继续执行。有多个等待任务时请明确选择。Infisical 的 `PRBOT_TELEGRAM_ACTOR_ID` 支持单个数字或逗号/空格分隔的多个数字 ID，授权最多缓存 60 秒，未知用户触发限流刷新，失败默认拒绝。
+
+Chat History 可浏览本地及当前授权 Telegram 用户的消息，保留会话选择、刷新与分页。输入区上方显示当前 Codex 任务的真实状态；Telegram 连接状态仍在 Settings 中查看。Redis 历史上限为 10 MB，不自动删除；写入失败明确提示并保留重试。SQLite 和工作目录需一并备份，丢失 SQLite 后不能只靠 Redis 自动重建执行任务。完整数据模型、失败恢复和 SDK 新 Thread 继续语义见 [Issue #13 说明](docs/Issue13-统一任务交互.md)。

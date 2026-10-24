@@ -13,6 +13,7 @@ import uuid
 from pathlib import Path
 
 from prbot.acceptance_interaction import check_interaction
+from prbot.acceptance_telegram import check_telegram
 from prbot.codex_adapter import CodexAdapter
 from prbot.config import ConfigError
 from prbot.conversation_service import ConversationService
@@ -135,6 +136,7 @@ async def check():
                 db.execute("DELETE FROM requests WHERE id=?", (rid,))
 
         await check_interaction(values, fields, evidence)
+        await check_telegram(values, archive, fields, evidence)
         prefix = "prbot:acceptance:" + uuid.uuid4().hex
         scratch_keys = [prefix + ":messages", prefix + ":bytes"]
         small = await archive.command("EVAL", SAVE, 2, *scratch_keys, "one", "hello", 10)

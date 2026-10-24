@@ -94,6 +94,18 @@ class ConversationService:
                     id TEXT PRIMARY KEY, task_id TEXT, text TEXT, created REAL);
                 CREATE TABLE IF NOT EXISTS channel_sessions (
                     scope TEXT PRIMARY KEY, link TEXT, mode TEXT, expires REAL);
+                CREATE TABLE IF NOT EXISTS pending_answers (
+                    task_id TEXT PRIMARY KEY, reply_id TEXT UNIQUE, text TEXT, created REAL);
+                CREATE TABLE IF NOT EXISTS telegram_drafts (
+                    scope TEXT PRIMARY KEY, task_id TEXT);
+                CREATE TABLE IF NOT EXISTS telegram_updates (
+                    id INTEGER PRIMARY KEY, scope TEXT, task_id TEXT, mode TEXT,
+                    snapshot TEXT, content TEXT, created REAL, reply TEXT);
+                CREATE TABLE IF NOT EXISTS telegram_notices (
+                    task_id TEXT, round INTEGER, status TEXT, message_id INTEGER,
+                    attempts INTEGER DEFAULT 0, delivered INTEGER DEFAULT 0,
+                    retry_at REAL DEFAULT 0,
+                    PRIMARY KEY(task_id, round, status));
             """)
 
     @contextmanager
@@ -153,7 +165,7 @@ class ConversationService:
             row = db.execute("SELECT * FROM requests WHERE id=?", (request_id,)).fetchone()
             return dict(row) if row else None
 
-    async def submit(self, request_id, actor, source, mode, link, text):
+    async def submit(self, request_id, actor, source, mode, link, text, *, archive_user=True):
         if (
             source not in {"desktop", "telegram"}
             or not isinstance(request_id, str)
@@ -190,6 +202,7 @@ class ConversationService:
             "conversation_id": conversation,
             "message_id": request_id + ":user",
             "source": source,
+            "mode": mode,
             "actor_id": actor,
             "role": "user",
             "content": json.loads(payload)["text"],
@@ -199,7 +212,8 @@ class ConversationService:
             "sequence": now,
         }
         # Archive before accepting. A failed write leaves the same request safe to retry.
-        await self.archive.save(message)
+        if archive_user:
+            await self.archive.save(message)
         with self.db() as db:
             db.execute(
                 "INSERT OR IGNORE INTO requests VALUES (?,?,?,?,?,?,?,?,?,?,?)",
@@ -233,6 +247,7 @@ class ConversationService:
             "id": row["id"],
             "conversation_id": row["conversation"],
             "mode": row["mode"],
+            "source": row["source"],
             "status": row["status"],
             "result": row["result"],
             "created_at": row["created"],
@@ -246,6 +261,89 @@ class ConversationService:
                 (actor, source),
             ).fetchall()
             return [self.public(row) for row in rows]
+
+    def visible_tasks(self, actor):
+        """Read-only Telegram visibility uses server-side bindings, like history."""
+        from prbot.telegram_auth import actor_ids
+
+        allowed = actor_ids(self.values.get("PRBOT_TELEGRAM_ACTOR_ID", ""))
+        tasks = self.tasks(actor)
+        with self.db() as db:
+            rows = db.execute(
+                "SELECT * FROM requests WHERE source='telegram' ORDER BY created DESC"
+            ).fetchall()
+        for row in rows:
+            parts = row["actor"].split(":")
+            if len(parts) == 3 and parts[1] in allowed:
+                tasks.append(self.public(row))
+        return sorted(tasks, key=lambda task: task["created_at"], reverse=True)[:100]
+
+    async def desktop_history(self, actor, mode, cursor="0", count=50):
+        from prbot.telegram_auth import actor_ids
+
+        # The native host supplies the local actor. Telegram IDs come exclusively
+        # from fresh server-side Infisical values, never frontend request fields.
+        allowed = actor_ids(self.values.get("PRBOT_TELEGRAM_ACTOR_ID", ""))
+        with self.db() as db:
+            modes = {r["id"]: r["mode"] for r in db.execute("SELECT id,mode FROM requests")}
+            routes = {
+                f"telegram:{r['id']}": r["task_id"]
+                for r in db.execute("SELECT id,task_id FROM telegram_updates")
+            }
+        all_messages = await self.archive.messages()
+        # Persisted mode metadata keeps task grouping usable even if only Redis
+        # history survives. Local execution rows remain authoritative when present.
+        remote_modes = {m.get("task_id"): m["mode"] for m in all_messages if m.get("mode")}
+        modes = remote_modes | modes
+        messages = []
+        for message in all_messages:
+            source, owner = message.get("source"), message.get("actor_id", "")
+            parts = owner.split(":")
+            if not (
+                (source == "desktop" and owner == actor)
+                or (source == "telegram" and len(parts) == 3 and parts[1] in allowed)
+            ):
+                continue
+            message = dict(message)
+            # Legacy per-update task IDs can be reconciled from the execution journal.
+            message["task_id"] = routes.get(message.get("task_id"), message.get("task_id"))
+            message_mode = modes.get(message.get("task_id"), message.get("mode"))
+            if not message_mode:
+                message_mode = next(
+                    (
+                        m
+                        for m in ("Issue", "Pull Request", "Chat History")
+                        if self.conversation(owner, source, m) == message.get("conversation_id")
+                    ),
+                    None,
+                )
+            if message_mode == mode:
+                message["content"] = self.clean(message.get("content", ""))
+                messages.append(message)
+        # Keyset cursor survives new writes; refresh uses 0 and replaces the page.
+        try:
+            start = 0
+            if cursor != "0":
+                anchor = json.loads(cursor)
+                start = next(
+                    (
+                        i + 1
+                        for i, m in enumerate(messages)
+                        if [m["conversation_id"], m["message_id"]] == anchor
+                    ),
+                    -1,
+                )
+                if start < 0:
+                    raise ValueError
+        except (ValueError, TypeError):
+            raise ConfigError("History changed. Refresh history.") from None
+        page = messages[start : start + min(count, 100)]
+        next_cursor = (
+            json.dumps([page[-1]["conversation_id"], page[-1]["message_id"]])
+            if page and start + len(page) < len(messages)
+            else "0"
+        )
+        return {"messages": page, "cursor": next_cursor, "reset": cursor == "0"}
 
     def event(self, task_id, kind, text):
         if kind not in {"progress", "text", "interaction", "status"}:
@@ -290,11 +388,34 @@ class ConversationService:
             raise ConfigError("This task is no longer waiting for an answer. Refresh tasks.")
         cleaned = self.clean(text.strip())
         now = time.time()
+        # Reserve the answer before remote I/O. A crash leaves this reservation
+        # retryable by the same message; competing replies cannot pollute history.
+        with self.db() as db:
+            db.execute("BEGIN IMMEDIATE")
+            current = db.execute("SELECT status FROM requests WHERE id=?", (task_id,)).fetchone()
+            if current["status"] != "needs_clarification":
+                previous = db.execute(
+                    "SELECT task_id FROM replies WHERE id=?", (reply_id,)
+                ).fetchone()
+                if previous and previous["task_id"] == task_id:
+                    return self.public(self.request(task_id))
+                raise ConfigError("Another answer was accepted. Refresh this task.")
+            db.execute(
+                "INSERT OR IGNORE INTO pending_answers VALUES (?,?,?,?)",
+                (task_id, reply_id, cleaned, now),
+            )
+            pending = db.execute(
+                "SELECT * FROM pending_answers WHERE task_id=?", (task_id,)
+            ).fetchone()
+            if not pending or pending["reply_id"] != reply_id:
+                raise ConfigError("Another answer is being saved. Retry that message first.")
+            cleaned, now = pending["text"], pending["created"]
         await self.archive.save(
             {
                 "conversation_id": row["conversation"],
                 "message_id": reply_id + ":user",
                 "source": source,
+                "mode": row["mode"],
                 "actor_id": actor,
                 "role": "user",
                 "content": cleaned,
@@ -305,15 +426,19 @@ class ConversationService:
             }
         )
         with self.db() as db:
-            # A double click or concurrent reply cannot queue the same turn twice.
+            db.execute("BEGIN IMMEDIATE")
+            previous = db.execute("SELECT task_id FROM replies WHERE id=?", (reply_id,)).fetchone()
+            if previous:
+                return self.public(self.request(task_id))
             changed = db.execute(
-                "UPDATE requests SET status='queued',changed=? WHERE id=? "
+                "UPDATE requests SET status='queued',result=NULL,changed=? WHERE id=? "
                 "AND status='needs_clarification'",
-                (now, task_id),
+                (time.time(), task_id),
             ).rowcount
             if not changed:
                 raise ConfigError("Another answer was accepted. Refresh this task.")
             db.execute("INSERT INTO replies VALUES (?,?,?,?)", (reply_id, task_id, cleaned, now))
+            db.execute("DELETE FROM pending_answers WHERE task_id=?", (task_id,))
         self.event(task_id, "status", "Answer accepted. Continuing this task with saved context.")
         return self.public(self.request(task_id))
 
@@ -338,28 +463,43 @@ class ConversationService:
                 "SELECT COUNT(*) FROM replies WHERE task_id=?", (row["id"],)
             ).fetchone()[0]
         suffix = ":" + str(round_number) if round_number else ""
+        try:
+            result = json.loads(row["result"])
+        except (ValueError, TypeError):
+            result = {
+                "summary": row["result"] or "Interrupted. Review repository state.",
+                "outcome": row["status"],
+                "pr_url": "",
+                "validation": "Not passed",
+            }
         message = {
             "conversation_id": row["conversation"],
             "message_id": row["id"] + ":assistant" + suffix,
             "source": row["source"],
+            "mode": row["mode"],
             "actor_id": row["actor"],
             "role": "assistant",
-            "content": row["result"],
+            "content": json.dumps(result, ensure_ascii=False),
             "created_at": row["changed"],
             "delivery_status": "saved",
             "task_id": row["id"],
             "sequence": row["changed"],
         }
         await self.archive.save(message)
-        outcome = json.loads(row["result"]).get("outcome", "failed")
+        outcome = result.get("outcome", "failed")
         if outcome == "needs_clarification":
-            self.event(row["id"], "interaction", json.loads(row["result"]).get("summary", ""))
-        self.change(
-            row["id"],
-            ("timed_out" if json.loads(row["result"]).get("error_code") == "timeout" else outcome)
-            if row["status"] == "save_pending"
-            else row["status"],
-        )
+            self.event(row["id"], "interaction", result.get("summary", ""))
+        with self.db() as db:
+            db.execute(
+                "UPDATE requests SET status=? WHERE id=? AND status=?",
+                (
+                    ("timed_out" if result.get("error_code") == "timeout" else outcome)
+                    if row["status"] == "save_pending"
+                    else row["status"],
+                    row["id"],
+                    row["status"],
+                ),
+            )
 
     async def retry_save(self, task_id, actor):
         row = self.request(task_id)
@@ -384,9 +524,23 @@ class ConversationService:
             history = []
             if not self.adapter:
                 cursor = "0"
-                while True:
+                if row["source"] == "telegram":
+                    history = [
+                        m
+                        for m in await self.archive.messages()
+                        if (
+                            m.get("task_id") == tid
+                            and m.get("actor_id") == row["actor"]
+                            and m.get("source") == "telegram"
+                        )
+                    ]
+                while row["source"] != "telegram":
                     page = await self.archive.history(row["conversation"], cursor)
-                    history.extend(page["messages"])
+                    history.extend(
+                        message
+                        for message in page["messages"]
+                        if payload["kind"] == "chat" or message.get("task_id") == tid
+                    )
                     cursor = page["cursor"]
                     if cursor == "0":
                         break
@@ -668,6 +822,20 @@ class ConversationService:
                             )
                     if row:
                         await self.execute(dict(row))
+                    else:
+                        with self.db() as db:
+                            pending = db.execute(
+                                "SELECT * FROM requests WHERE status='save_pending' "
+                                "AND (? IS NULL OR source=?) ORDER BY changed LIMIT 1",
+                                (source, source),
+                            ).fetchone()
+                        if pending:
+                            try:
+                                self.select_task_connections(pending)
+                                await self.save_result(pending)
+                            except ConfigError:
+                                pass  # Retained for the next archive-only retry.
+
                 finally:
                     fcntl.flock(lock, fcntl.LOCK_UN)
                 if not row:
