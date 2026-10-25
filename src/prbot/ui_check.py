@@ -109,7 +109,7 @@ window.__uiCheckResult = 'pending';
   content.scrollTop = 0;
   await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
   window.__uiCheckResult = 'ok';
-})().catch(error => { window.__uiCheckResult = 'failed:' + error.message; });
+})().catch(error => { window.__uiCheckResult = 'failed:' + error.message + ' ' + (error.stack || ''); });
 true;
 """,
             lambda result, error: poll_result(),
@@ -721,12 +721,19 @@ true;
   assertValues(updated, true);
   await select('Background Service');
   await tick();
-  assert(document.querySelectorAll('#service-power').length === 1);
-  assert(document.querySelector('.service-indicator'));
+  assert(document.querySelectorAll('#service-power').length === 1, 'Service toggle missing');
+  assert(document.querySelector('.service-indicator'), 'Service indicator missing');
   assert(!document.querySelector('#settings .service-core'), 'Telegram still animates');
+  // Native heartbeats may race the injected stale fixture; settle their bridge
+  // replies while holding status deterministic for this assertion only.
+  const receiveBeforeStale = window.receiveNative;
+  window.receiveNative = payload => receiveBeforeStale(payload.completed_action === 'ready'
+    ? {...payload,status:undefined} : payload);
   window.receiveNative({ok:true, status:{state:'stale',loaded:true}});
   await tick();
-  assert(document.getElementById('service-power').getAttribute('aria-label') === 'Refresh status');
+  assert(document.getElementById('service-power').getAttribute('aria-label') === 'Refresh status',
+    'Injected stale service status did not offer refresh');
+  window.receiveNative = receiveBeforeStale;
   document.querySelector('[data-section="Workspace"]').click();
   await tick();
   document.getElementById('close-settings').click();
@@ -786,6 +793,7 @@ true;
   conversationScroll.dispatchEvent(new Event('scroll')); await tick();
   const draftValue = field('draft').value;
   const beforeFeedbackTop = conversationScroll.scrollTop;
+  assert(beforeFeedbackTop === 0, `Reading setup scrolled to ${beforeFeedbackTop}`);
   fixtureTask.events.push({sequence:37,kind:'text',created:38,text:'Ready for your answer.'});
   window.receiveNative({ok:true,tasks:[JSON.parse(JSON.stringify(fixtureTask))],
     tasks_revision:999999999}); await tick();
@@ -936,7 +944,7 @@ true;
   assert(field('model-help').textContent.includes('Loaded 1'), 'Timeout retry did not recover');
   assert(!/[\u4e00-\u9fff]/.test(document.body.innerText), 'Non-English product copy');
   window.__uiCheckResult = 'ok';
-})().catch(error => { window.__uiCheckResult = 'failed:' + error.message; });
+})().catch(error => { window.__uiCheckResult = 'failed:' + error.message + ' ' + (error.stack || ''); });
 true;
 """,
             lambda result, error: poll_result(),
