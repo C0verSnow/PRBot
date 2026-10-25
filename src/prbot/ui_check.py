@@ -219,7 +219,7 @@ true;
     const root = document.scrollingElement;
     root.scrollTop = root.scrollHeight;
     assert(root.scrollTop === 0 && root.scrollHeight <= innerHeight + 1,
-      `Blank document scroll: top=${root.scrollTop}, height=${root.scrollHeight}, viewport=${innerHeight}`);
+      `Blank document scroll: top=${root.scrollTop}, height=${root.scrollHeight}`);
     const main = document.querySelector('main');
     main.scrollTop = main.scrollHeight;
     const tail = main.lastElementChild.getBoundingClientRect().bottom;
