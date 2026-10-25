@@ -109,7 +109,9 @@ window.__uiCheckResult = 'pending';
   content.scrollTop = 0;
   await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
   window.__uiCheckResult = 'ok';
-})().catch(error => { window.__uiCheckResult = 'failed:' + error.message; });
+})().catch(error => {
+  window.__uiCheckResult = 'failed:' + error.message + ' ' + (error.stack || '');
+});
 true;
 """,
             lambda result, error: poll_result(),
@@ -294,7 +296,45 @@ true;
   complete('models', {model_catalog:{models:[{id:'fixture-model',name:'Fixture',default:true}]}});
   await tick();
   assert(field('model').options.length === 2, 'Model catalog not rendered');
+  // Issue #25: click -> immediate feedback -> failure/retry -> visible success.
+  field('refresh-models').click(); await tick();
+  assert(field('refresh-models').disabled
+    && field('refresh-models').textContent.includes('Refreshing'),
+    'Model refresh has no immediate loading state');
+  assert(!field('draft').disabled, 'Model refresh blocked editing');
+  const refreshCount = requests.filter(item => item.action === 'models').length;
+  field('refresh-models').click(); await tick();
+  assert(requests.filter(item => item.action === 'models').length === refreshCount,
+    'Repeated refresh created overlapping requests');
+  window.receiveNative({ok:true,completed_action:'ready',status:{state:'stopped'}}); await tick();
+  assert(field('refresh-models').disabled, 'Heartbeat cleared model loading state');
+  complete('models',{ok:false,model_catalog:{models:[],error:'Sign in to Codex and retry.'}});
+  await tick();
+  assert(field('model').options.length === 2, 'Failed refresh discarded last model list');
+  assert(field('model-help').getAttribute('role') === 'alert'
+    && field('model-help').textContent.includes('Sign in'), 'Refresh failure is silent');
+  assert(field('refresh-models').textContent.includes('Retry'), 'Model failure has no retry');
+  field('refresh-models').click(); await tick();
+  complete('models',{model_catalog:{models:[]}}); await tick();
+  assert(field('model-help').textContent.includes('no visible text models'),
+    'Empty catalog silently fell back to default');
+  field('refresh-models').click(); await tick();
+  complete('models',{model_catalog:{models:[{id:'fixture-model',name:'Fixture',default:true}]}});
+  await tick();
+  assert(!field('refresh-models').disabled && field('model-help').textContent.includes('Loaded 1'),
+    'Identical successful refresh has no success feedback');
+
   chooseModel('fixture-model'); await tick();
+  field('refresh-models').click(); await tick();
+  complete('models',{model_catalog:{models:[{id:'another-model',name:'Another',default:false}]}});
+  await tick();
+  assert(field('model').value === 'fixture-model'
+    && field('model').selectedOptions[0].textContent.includes('unavailable'),
+    'Removed model silently changed to default');
+  field('refresh-models').click(); await tick();
+  complete('models',{model_catalog:{models:[{id:'fixture-model',name:'Fixture',default:true}]}});
+  await tick();
+
   // Drain a pre-existing history request, then queued correlated requests.
   complete('history'); await tick(); complete('history'); await tick();
   for (const link of ['https://github.com/owner/repo',
@@ -508,6 +548,14 @@ true;
   edit(field('id-token'), 'unsaved-connection-draft'); field('id-token').focus(); await tick();
   const tokenNode = field('id-token');
   const stable = {ok:true, status:{state:'stopped',loaded:false},tasks:[]};
+  const receiveBeforeStable = window.receiveNative;
+  const parkedNativeReplies = [];
+  // Measure only the unchanged payloads; replay legitimate native completions
+  // after the measurement instead of counting their unrelated DOM updates.
+  window.receiveNative = payload => {
+    if (payload === stable) receiveBeforeStable(payload);
+    else parkedNativeReplies.push(payload);
+  };
   window.receiveNative(stable); await tick();
   let mutations = 0;
   const stableObserver = new MutationObserver(() => mutations++);
@@ -518,6 +566,8 @@ true;
   assert(mutations === 0, 'Unchanged background status mutated Settings');
   assert(field('id-token') === tokenNode && document.activeElement === tokenNode,
     'Polling remounted or blurred connection input');
+  window.receiveNative = receiveBeforeStable;
+  for (const payload of parkedNativeReplies) receiveBeforeStable(payload);
   const switchStart = performance.now();
   await select('Workspace');
   assert(performance.now() - switchStart < 500, 'Settings navigation blocked by connections');
@@ -683,12 +733,19 @@ true;
   assertValues(updated, true);
   await select('Background Service');
   await tick();
-  assert(document.querySelectorAll('#service-power').length === 1);
-  assert(document.querySelector('.service-indicator'));
+  assert(document.querySelectorAll('#service-power').length === 1, 'Service toggle missing');
+  assert(document.querySelector('.service-indicator'), 'Service indicator missing');
   assert(!document.querySelector('#settings .service-core'), 'Telegram still animates');
+  // Native heartbeats may race the injected stale fixture; settle their bridge
+  // replies while holding status deterministic for this assertion only.
+  const receiveBeforeStale = window.receiveNative;
+  window.receiveNative = payload => receiveBeforeStale(payload.completed_action === 'ready'
+    ? {...payload,status:undefined} : payload);
   window.receiveNative({ok:true, status:{state:'stale',loaded:true}});
   await tick();
-  assert(document.getElementById('service-power').getAttribute('aria-label') === 'Refresh status');
+  assert(document.getElementById('service-power').getAttribute('aria-label') === 'Refresh status',
+    'Injected stale service status did not offer refresh');
+  window.receiveNative = receiveBeforeStale;
   document.querySelector('[data-section="Workspace"]').click();
   await tick();
   document.getElementById('close-settings').click();
@@ -729,6 +786,12 @@ true;
   assert(document.querySelector('.task-status').dataset.state === 'needs_clarification',
     'Task animation is not driven by task state');
   const feed = document.querySelector('.execution-feed');
+  const conversationScroll = document.querySelector('main');
+  assert(getComputedStyle(feed).overflowY === 'visible'
+    && getComputedStyle(feed).maxHeight === 'none',
+    'Conversation is split by a separately scrolling execution feed');
+  assert(feed.closest('[aria-label="Conversation history"]'),
+    'Live messages left the conversation');
   const question = [...feed.querySelectorAll('.message-card')]
     .find(card => card.textContent.includes('Which branch should I use?'));
   assert(question?.dataset.role === 'assistant'
@@ -737,20 +800,27 @@ true;
   assert([...feed.querySelectorAll('[data-role="system"]')]
     .some(card => card.textContent.includes('Waiting for an answer.')),
     'Runtime status was mislabeled as Codex');
-  feed.scrollTop = 0; feed.dispatchEvent(new Event('scroll')); await tick();
-  field('draft').focus();
+  field('draft').focus({preventScroll:true}); await tick();
+  conversationScroll.scrollTop = 0;
+  conversationScroll.dispatchEvent(new Event('scroll')); await tick();
   const draftValue = field('draft').value;
+  const beforeFeedbackTop = conversationScroll.scrollTop;
+  assert(beforeFeedbackTop === 0, `Reading setup scrolled to ${beforeFeedbackTop}`);
   fixtureTask.events.push({sequence:37,kind:'text',created:38,text:'Ready for your answer.'});
   window.receiveNative({ok:true,tasks:[JSON.parse(JSON.stringify(fixtureTask))],
     tasks_revision:999999999}); await tick();
-  assert(feed.scrollTop === 0, 'New feedback interrupted historical reading');
+  assert(conversationScroll.scrollTop === 0,
+    `New feedback interrupted historical reading: before=${beforeFeedbackTop}, ` +
+    `after=${conversationScroll.scrollTop}, height=${conversationScroll.scrollHeight}`);
   assert(document.activeElement === field('draft') && field('draft').value === draftValue,
     'Feedback changed composer focus or text');
-  feed.scrollTop = feed.scrollHeight; feed.dispatchEvent(new Event('scroll')); await tick();
+  conversationScroll.scrollTop = conversationScroll.scrollHeight;
+  conversationScroll.dispatchEvent(new Event('scroll')); await tick();
   fixtureTask.events.push({sequence:38,kind:'text',created:39,text:'Task safely paused.'});
   window.receiveNative({ok:true,tasks:[JSON.parse(JSON.stringify(fixtureTask))],
     tasks_revision:999999999}); await tick();
-  assert(feed.scrollHeight - feed.scrollTop - feed.clientHeight < 2,
+  assert(conversationScroll.scrollHeight - conversationScroll.scrollTop
+    - conversationScroll.clientHeight < 2,
     'Feedback did not follow near the bottom');
   edit(field('answer-ui-waiting-task'), 'Use feature/ui'); await tick();
   field('new-session').click(); await tick();
@@ -820,14 +890,78 @@ true;
   feed.scrollTop = feed.scrollHeight; await tick();
   const mainBeforeLogWheel = mainScroll.scrollTop;
   await wheel(feed, -900);
-  assert(mainScroll.scrollTop === mainBeforeLogWheel, 'Log wheel chained to main scroll');
+  assert(mainScroll.scrollTop >= mainBeforeLogWheel, 'Conversation wheel moved backwards');
+  assert(feed.scrollTop === 0, 'Execution messages created a second scroll position');
   checkViewport();
   document.querySelector('main').scrollTop = document.querySelector('main').scrollHeight;
   field('user').focus();
   assert(document.activeElement.id === 'user', 'Dialog did not restore focus');
+  // A delivered conversation stays complete until the user opts into checking GitHub.
+  const completedTask = {...fixtureTask,status:'delivered_unverified',events:[],changed_at:200,
+    result:JSON.stringify({summary:'The requested work is done.',outcome:'delivered_unverified',
+      pr_url:'https://github.com/owner/repo/pull/25',validation:'Old pending check snapshot',
+      delivery:{code:'completed_by_codex',pr:'open',issue:'closed',ci:'failed'}})};
+  const verificationCount = routed.filter(body => body.action === 'verify_delivery').length;
+  window.receiveNative({ok:true,tasks:[completedTask],tasks_revision:999999999}); await tick();
+  assert(!document.body.innerText.includes('verification incomplete'),
+    'Completion is still downgraded by automatic verification');
+  assert(routed.filter(body => body.action === 'verify_delivery').length === verificationCount,
+    'Delivery verification was automatic');
+  assert(document.querySelector('.delivery-warning'), 'Known delivery failure was hidden');
+  const verify = () => document.querySelector('.verify-delivery');
+  assert(verify() && !verify().disabled, 'Optional verification entry is missing');
+  verify().click(); await tick();
+  assert(verify().disabled && verify().textContent.includes('Verifying'),
+    'Verification has no loading feedback');
+  const verifyRequest = routed.filter(body => body.action === 'verify_delivery').at(-1);
+  window.receiveNative({ok:false,completed_action:'verify_delivery',
+    bridge_id:verifyRequest.bridge_id,
+    delivery_verification:{task_id:fixtureTask.id,
+      error:'Network unavailable. Retry verification.'}});
+  await tick();
+  assert(verify().textContent.includes('Retry')
+    && document.querySelector('.verification-result').textContent.includes('Network unavailable'),
+    'Verification failure has no reason or retry');
+  verify().click(); await tick();
+  const verifyRetry = routed.filter(body => body.action === 'verify_delivery').at(-1);
+  window.receiveNative({ok:true,completed_action:'verify_delivery',bridge_id:verifyRetry.bridge_id,
+    delivery_verification:{task_id:fixtureTask.id,checked_at:200,
+      detail:'Required remote checks passed.',delivery:{pr:'open',issue:'closed',ci:'passed'}}});
+  await tick();
+  assert(document.querySelector('.verification-result').textContent.includes('passed'),
+    'Verification success did not update');
+  assert(!document.querySelector('.delivery-warning'),
+    'Old failed snapshot contradicted the latest successful verification');
+  assert(document.querySelector('.task-status').dataset.state === 'delivered_unverified',
+    'Optional verification rewrote conversation completion');
+  // A send failure must also end the model loading state and offer retry.
+  handler.postMessage = () => { throw new Error('Fixture bridge failure'); };
+  field('refresh-models').click(); await tick();
+  assert(!field('refresh-models').disabled
+    && field('model-help').textContent.includes('could not be sent'),
+    'Bridge failure left model refresh spinning');
+  handler.postMessage = body => routed.push(body);
+  field('refresh-models').click(); await tick();
+  const timedOutModel = routed.filter(body => body.action === 'models').at(-1);
+  const originalNow = Date.now;
+  Date.now = () => originalNow() + 61000;
+  await waitFor(() => !field('refresh-models').disabled);
+  Date.now = originalNow;
+  assert(field('model-help').textContent.includes('timed out'), 'Model timeout is silent');
+  // A late timed-out success must not overwrite the visible retry state.
+  window.receiveNative({ok:true,completed_action:'models',bridge_id:timedOutModel.bridge_id,
+    model_catalog:{models:[{id:'stale-model',name:'Stale',default:true}]}}); await tick();
+  assert(field('model-help').textContent.includes('timed out'), 'Stale model response won');
+  field('refresh-models').click(); await tick();
+  const modelRetry = routed.filter(body => body.action === 'models').at(-1);
+  window.receiveNative({ok:true,completed_action:'models',bridge_id:modelRetry.bridge_id,
+    model_catalog:{models:[{id:'fixture-model',name:'Fixture',default:true}]}}); await tick();
+  assert(field('model-help').textContent.includes('Loaded 1'), 'Timeout retry did not recover');
   assert(!/[\u4e00-\u9fff]/.test(document.body.innerText), 'Non-English product copy');
   window.__uiCheckResult = 'ok';
-})().catch(error => { window.__uiCheckResult = 'failed:' + error.message; });
+})().catch(error => {
+  window.__uiCheckResult = 'failed:' + error.message + ' ' + (error.stack || '');
+});
 true;
 """,
             lambda result, error: poll_result(),

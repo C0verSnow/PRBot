@@ -3,13 +3,14 @@ import { useNativeBridge } from './bridge';
 import { Sidebar } from './components/Sidebar';
 import { Composer } from './components/Composer';
 import { HistoryBrowser } from './components/HistoryBrowser';
+import { DeliveryVerificationContext } from './components/DeliveryVerification';
 import { TaskStatus } from './components/TaskStatus';
 import { TaskFeed } from './components/TaskFeed';
 import { SettingsPanel, serviceLabel } from './components/SettingsPanel';
 import type { AnswerDraft, Draft, HistorySession, Workspace } from './types';
 const fresh = (workspace: Workspace = 'GitHub'): Draft => ({ link: '', text: '', request_id: crypto.randomUUID(), workspace, created_at: Date.now() / 1000 });
 export function App() {
-  const { result, busy, submitting, cancelling, send } = useNativeBridge();
+  const { result, busy, submitting, cancelling, modelsLoading, verifying, send } = useNativeBridge();
   const [initial] = useState(() => fresh());
   const [view, setView] = useState<Workspace>('GitHub');
   const [drafts, setDrafts] = useState<Record<string, Draft>>({ [initial.request_id]: initial });
@@ -31,7 +32,7 @@ export function App() {
     if (cancelOpen) cancelDialog.current?.showModal();
   }, [cancelOpen]);
   useEffect(() => {
-    if (result.id_token_result?.applied) send('models');
+    if (result.id_token_result?.applied) send('models', { reset: true });
   }, [result.id_token_result, send]);
   const accepted = useRef('');
   const selectedTask = result.tasks?.find(task => task.id === selected);
@@ -109,15 +110,16 @@ export function App() {
   for (const [id, item] of Object.entries(drafts)) if (!entries.has(id) && (item.link || item.text)) entries.set(id, { id, title: `Draft · ${(item.text || item.link).slice(0, 120)}`, mode: item.workspace === 'Chat History' ? 'Chat History' : 'Issue', source: 'desktop', created_at: item.created_at || 0 });
   const sessionList = [...entries.values()].sort((a, b) => b.created_at - a.created_at);
   const optimistic = currentSubmitting ? submitted.current : null;
-  return <div className="workspace-shell flex bg-canvas text-ink">
+  return <DeliveryVerificationContext value={{ verification: result.delivery_verification, verifying, send }}><div className="workspace-shell flex bg-canvas text-ink">
     <Sidebar active={view} onSelect={mode => newSession(mode)} onSettings={() => setSettingsOpen(true)} user={result.status?.user || 'Local user'} expanded={expanded} onToggle={() => setExpanded(value => !value)} sessions={sessionList} selected={selected} onSession={chooseSession} counts={counts} loading={historyLoading} error={historyError} onRefresh={() => setRefresh(value => value + 1)} tasks={result.tasks || []} />
     <main className="workspace-main min-h-0 min-w-0 flex-1 overflow-y-auto"><header className="flex h-[76px] items-center justify-between px-7"><span className="text-xs text-muted">{view === 'GitHub' ? 'GitHub workspace' : 'Private chat'}</span><button id="status-button" className="secondary" onClick={() => setSettingsOpen(true)}><span id="service-label">{serviceLabel(result.status)}</span></button></header>
       <div className="mx-auto max-w-[760px] px-6 pb-8">
         <h1 className="mb-6 break-words font-serif text-[30px]">{selectedTask?.title || (view === 'GitHub' ? 'What would you like to change?' : 'Start a private conversation.')}</h1>
-        <HistoryBrowser result={result} send={send} busy={busy} session={selected} refreshKey={`${refresh}:${selectedTask?.status || ''}`} onSessions={onSessions} task={selectedTask} optimistic={optimistic} />
+        <HistoryBrowser result={result} send={send} busy={busy} session={selected} refreshKey={`${refresh}:${selectedTask?.status || ''}`} onSessions={onSessions} task={selectedTask} optimistic={optimistic}>
         <section aria-label="Task status" className="mb-6 space-y-3">{selectedTask && <TaskFeed key={selectedTask.id} task={selectedTask} busy={busy} send={send} answer={answers[selectedTask.id] || { text: '', request_id: '' }} onAnswerChange={text => setAnswers(previous => ({ ...previous, [selectedTask.id]: { text, request_id: previous[selectedTask.id]?.request_id || crypto.randomUUID(), revision: `${selectedTask.changed_at || selectedTask.created_at}:${selectedTask.result || ''}` } }))} />}</section>
+        </HistoryBrowser>
         <TaskStatus task={selectedTask} submitting={currentSubmitting} />
-        <Composer catalog={result.model_catalog} onRefreshModels={() => send('models')} stopPending={cancelling && stoppingTask.current === selected} mode={view} draft={draft} task={selectedTask} onChange={value => setDrafts(previous => ({ ...previous, [selected]: value }))} busy={busy} submitting={currentSubmitting} onNew={() => newSession()} onCancel={() => setCancelOpen(true)} onStop={() => { if (selectedTask && !cancelling) { stoppingTask.current = selectedTask.id; send('cancel_task', { task_id: selectedTask.id }); } }} onSend={() => {
+        <Composer modelsLoading={modelsLoading} catalog={result.model_catalog} onRefreshModels={() => send('models')} stopPending={cancelling && stoppingTask.current === selected} mode={view} draft={draft} task={selectedTask} onChange={value => setDrafts(previous => ({ ...previous, [selected]: value }))} busy={busy} submitting={currentSubmitting} onNew={() => newSession()} onCancel={() => setCancelOpen(true)} onStop={() => { if (selectedTask && !cancelling) { stoppingTask.current = selectedTask.id; send('cancel_task', { task_id: selectedTask.id }); } }} onSend={() => {
           submitted.current = { ...draft };
           submissions.current.set(draft.request_id, { ...draft });
           // Every new submission has its own session/task identity. Continue task
@@ -131,5 +133,5 @@ export function App() {
       </div></main>
     {cancelOpen && <dialog ref={cancelDialog} className="draft-confirm" role="alertdialog" aria-labelledby="cancel-title" onCancel={() => setCancelOpen(false)}><div><h2 id="cancel-title">Discard unsent draft?</h2><p className="my-4">Saved history and running tasks are kept.</p><button autoFocus className="secondary mr-3" onClick={() => setCancelOpen(false)}>Keep editing</button><button id="confirm-cancel" className="secondary" onClick={() => { setDrafts(previous => ({ ...previous, [selected]: fresh(view) })); setCancelOpen(false); }}>Discard draft</button></div></dialog>}
     <SettingsPanel open={settingsOpen} onClose={() => setSettingsOpen(false)} busy={busy} result={result} send={send} />
-  </div>;
+  </div></DeliveryVerificationContext>;
 }

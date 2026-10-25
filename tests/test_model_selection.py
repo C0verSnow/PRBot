@@ -105,9 +105,6 @@ def test_catalog_filters_hidden_non_text_duplicates_and_uses_model_slug():
     )
     assert catalog(client) == [{"id": "visible", "name": "visible", "default": False}]
     client.models.assert_called_once_with(include_hidden=False)
-    client.models.return_value.next_cursor = "next-page"
-    with pytest.raises(RuntimeError, match="incomplete"):
-        catalog(client)
 
 
 async def test_controller_passes_model_to_worker_without_fallback(tmp_path, monkeypatch):

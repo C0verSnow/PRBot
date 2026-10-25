@@ -391,7 +391,9 @@ async def test_delivery_preserves_pr_and_closed_issue_when_checks_not_passed(
     github.close.assert_awaited_once()
 
 
-async def test_execution_archives_delivery_facts_and_retry_preserves_them(app, monkeypatch):
+async def test_execution_does_not_verify_until_user_requests_and_retry_preserves_result(
+    app, monkeypatch
+):
     from prbot.github import CheckFailure
 
     await submit(app)
@@ -419,14 +421,23 @@ async def test_execution_archives_delivery_facts_and_retry_preserves_them(app, m
     row = app.request("request-123")
     assert row["status"] == "save_pending"
     result = json.loads(row["result"])
-    assert result["outcome"] == "delivered_unverified"
-    assert result["delivery"]["issue"] == "closed"
-    assert result["delivery"]["ci"] == "failed"
+    assert result["outcome"] == "completed"
+    assert "delivery" not in result
+    github.request.assert_not_awaited()
     assert result["pr_url"] == "https://github.com/o/r/pull/1"
     app.archive.save.side_effect = None
     await app.retry_save("request-123", "local:me")
-    assert app.request("request-123")["status"] == "delivered_unverified"
+    assert app.request("request-123")["status"] == "completed"
     assert app.request("request-123")["result"] == row["result"]
+    adapter.invoke.assert_awaited_once()
+    before = app.request("request-123")
+    saved_count = app.archive.save.await_count
+    verification = await app.verify_task_delivery("request-123", "local:me")
+    assert verification["delivery"]["ci"] == "failed"
+    assert verification["delivery"]["issue"] == "closed"
+    assert verification["checked_at"] > 0
+    assert app.request("request-123") == before
+    assert app.archive.save.await_count == saved_count
     adapter.invoke.assert_awaited_once()
 
 
@@ -501,3 +512,20 @@ async def test_sdk_failure_with_pr_keeps_github_facts_without_claiming_code_succ
         "head_sha": "head",
         "detail": "Required remote checks passed.",
     }
+
+
+async def test_manual_verification_rejects_unknown_actor_and_running_task(app):
+    await submit(app)
+    with pytest.raises(ConfigError, match="not available"):
+        await app.verify_task_delivery("request-123", "local:other")
+    with pytest.raises(ConfigError, match="Wait for"):
+        await app.verify_task_delivery("request-123", "local:me")
+    with pytest.raises(ConfigError, match="not found"):
+        await app.verify_task_delivery("missing", "local:me")
+
+
+async def test_private_chat_cannot_trigger_github_verification(app):
+    task = await app.submit("private-request", "local:me", "desktop", "Chat History", "", "Hi")
+    app.change(task["id"], "completed", json.dumps({"outcome": "completed", "summary": "Hi"}))
+    with pytest.raises(ConfigError, match="Private conversations"):
+        await app.verify_task_delivery(task["id"], "local:me")

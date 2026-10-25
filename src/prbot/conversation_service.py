@@ -816,15 +816,8 @@ class ConversationService:
                 timeout,
                 **({"model": payload["model"]} if payload.get("model") else {}),
             )
-            if (
-                not self.adapter
-                and payload["kind"] != "chat"
-                and (
-                    result.get("outcome") == "completed"
-                    or (result.get("pr_url") and result.get("outcome") != "needs_clarification")
-                )
-            ):
-                await self.verify_delivery(payload, result, token)
+            # Completion belongs to the conversation. Delivery checks are a
+            # separate user-requested read and must not downgrade this result.
             text = self.clean(json.dumps(result, ensure_ascii=False))
             self.change(tid, "save_pending", text)
             if self.request(tid)["status"] == "save_pending":
@@ -901,6 +894,30 @@ class ConversationService:
             "answers": answers,
             "instruction": "Continue this original task using these answers. Inspect existing "
             "repository work before editing; do not repeat completed delivery operations.",
+        }
+
+    async def verify_task_delivery(self, task_id, actor):
+        """Return current delivery facts without editing a result or rerunning Codex."""
+        row = self.request(task_id)
+        if not row or not any(task["id"] == task_id for task in self.visible_tasks(actor)):
+            raise ConfigError("Task not found or not available to this account.")
+        if row["status"] not in {"completed", "delivered_unverified", "failed"}:
+            raise ConfigError("Wait for the task result before verifying delivery.")
+        payload = json.loads(row["payload"])
+        if payload["kind"] == "chat":
+            raise ConfigError("Private conversations do not have GitHub delivery to verify.")
+        result = json.loads(row["result"])
+        if not isinstance(result, dict):
+            raise ConfigError("Delivery data is missing. Review the repository directly.")
+        self.select_task_connections(row)
+        token = github_token(self.values)
+        self.runtime_secrets.append(token)
+        await self.verify_delivery(payload, result, token)
+        return {
+            "task_id": task_id,
+            "checked_at": time.time(),
+            "detail": self.clean(result.get("validation", "Verification finished.")),
+            "delivery": result["delivery"],
         }
 
     async def verify_delivery(self, payload, result, token):
