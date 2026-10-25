@@ -5,6 +5,12 @@ if [[ "${CI:-}" != "true" || "$(uname -s)" != "Darwin" || "$(uname -m)" != "arm6
   echo "只允许在远端 macOS arm64 CI 中构建，禁止本地编译验证。" >&2
   exit 1
 fi
+for required_file in README.md .env.example; do
+  if [[ ! -f "$required_file" ]]; then
+    echo "缺少打包必需文件：${required_file}；请恢复文件后重新运行远端 CI。" >&2
+    exit 1
+  fi
+done
 python -m PyInstaller --noconfirm --clean packaging/PRBot.spec
 APP="dist/PRBot.app"
 # This development build uses an ad hoc signature, NOT a Developer ID signature.
@@ -14,11 +20,11 @@ mkdir -p dist/dmg-content
 # ditto preserves the bundle symlinks and embedded runtime.
 ditto "$APP" dist/dmg-content/PRBot.app
 ln -s /Applications dist/dmg-content/Applications
-cp 使用手册.md .env.example dist/dmg-content/
+cp README.md .env.example dist/dmg-content/
 cat > dist/dmg-content/DEVELOPMENT-NOTICE.txt <<'NOTICE'
 PRBot v0.1.0 development build: Apple Silicon / macOS 14+
 Ad hoc signature only; no Developer ID signature or Apple notarization.
-Read the manual. This notice does not establish Gatekeeper or live-service acceptance.
+Read README.md. This notice does not establish Gatekeeper or live-service acceptance.
 NOTICE
 hdiutil create -volname PRBot -srcfolder dist/dmg-content -ov -format UDZO \
   dist/PRBot-v0.1.0-macos-arm64.dmg

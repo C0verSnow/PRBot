@@ -94,8 +94,8 @@ jobs:
             dist/build-dependencies.txt
             dist/PRBot-ui*.png
             dist/PRBot-ui.json
-            使用手册.md
-            docs/验收记录.md
+            README.md
+            docs/Issue23-DMG打包修复.md
 
   acceptance:
     if: github.event_name == 'workflow_dispatch' && inputs.acceptance
