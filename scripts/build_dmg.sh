@@ -7,7 +7,7 @@ if [[ "${CI:-}" != "true" || "$(uname -s)" != "Darwin" || "$(uname -m)" != "arm6
 fi
 for required_file in README.md .env.example; do
   if [[ ! -f "$required_file" ]]; then
-    echo "缺少打包必需文件：$required_file；请恢复文件后重新运行远端 CI。" >&2
+    echo "缺少打包必需文件：${required_file}；请恢复文件后重新运行远端 CI。" >&2
     exit 1
   fi
 done
