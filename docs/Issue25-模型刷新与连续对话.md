@@ -51,3 +51,8 @@ macOS WebKit 操作覆盖：点击刷新立即等待、防重入、普通轮询�
 - [PR #26](https://github.com/C0verSnow/PRBot/pull/26) 已提交，issue #25 已按要求关闭，PR 保持打开等待审阅。
 
 模拟目录和 GitHub 响应不代表真实账户每个模型都可用；本次未使用用户凭据发起付费模型推理。可选的真实 provider acceptance 作业未启用，不能把模拟操作验收当作生产账户的模型授权证明。
+
+
+最终边界补充也已完成：[运行 40189453278](https://github.com/C0verSnow/PRBot/actions/runs/40189453278)，功能提交 8dfd4aa。318 个 Python 测试、原生界面与安装包检查再次全部通过，包括旧失败快照被新成功查询替代的场景，以及相同状态测量期间暂存并重放其他原生回执的测试隔离。
+
+最新证据：[源码界面](https://github.com/C0verSnow/PRBot/actions/runs/40189453278/artifacts/12597179207)、[安装包界面](https://github.com/C0verSnow/PRBot/actions/runs/40189453278/artifacts/12596998086)、[DMG 下载](https://github.com/C0verSnow/PRBot/actions/runs/40189453278/artifacts/12596558618)。后续仅补充文档与任务清单记录。
