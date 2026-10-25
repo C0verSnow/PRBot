@@ -166,6 +166,27 @@ true;
         if not finished:
             web.evaluateJavaScript_completionHandler_("!!window.__pasteRequest", paste_request)
 
+    def wheel_request(value, error):
+        if finished:
+            return
+        if not error and value:
+            import Quartz
+
+            # Dispatch an actual pixel scroll event through WebKit's native responder.
+            # A JavaScript WheelEvent alone does not perform default scrolling.
+            event = Quartz.CGEventCreateScrollWheelEvent(
+                None, Quartz.kCGScrollEventUnitPixel, 1, int(value["delta"])
+            )
+            native = AppKit.NSEvent.eventWithCGEvent_(event)
+            target = web.hitTest_((value["x"], web.bounds().size.height - value["y"]))
+            (target or web).scrollWheel_(native)
+            web.evaluateJavaScript_completionHandler_("window.__wheelRequest = null", None)
+        AppHelper.callLater(0.05, wheel_poll)
+
+    def wheel_poll():
+        if not finished:
+            web.evaluateJavaScript_completionHandler_("window.__wheelRequest || null", wheel_request)
+
     def poll():
         if finished:
             return
@@ -685,6 +706,20 @@ true;
     'Current task selection does not drive Codex status');
   window.receiveNative({ok:true,tasks:[fixtureTask],tasks_revision:999999999}); await tick();
   checkViewport();
+  const mainScroll = document.querySelector('main');
+  const wheel = async (element, delta) => {
+    const bounds = element.getBoundingClientRect();
+    window.__wheelRequest = {x:bounds.left + 20,y:bounds.top + 20,delta};
+    await waitFor(() => !window.__wheelRequest); await tick();
+  };
+  mainScroll.scrollTop = 0;
+  await wheel(mainScroll, -900);
+  assert(mainScroll.scrollTop > 0, 'Native wheel did not scroll long task content');
+  for (let count = 0; count < 4; count++) await wheel(mainScroll, -900);
+  assert(document.scrollingElement.scrollTop === 0, 'Native wheel escaped into blank document');
+  assert(mainScroll.scrollTop <= mainScroll.scrollHeight - mainScroll.clientHeight + 1,
+    'Native wheel exceeded actual content');
+  checkViewport();
   document.querySelector('main').scrollTop = document.querySelector('main').scrollHeight;
   field('user').focus();
   assert(document.activeElement.id === 'user', 'Dialog did not restore focus');
@@ -698,4 +733,5 @@ true;
 
     AppHelper.callLater(0.25, poll)
     AppHelper.callLater(0.25, paste_poll)
+    AppHelper.callLater(0.25, wheel_poll)
     AppHelper.callLater(75, lambda: finish(False, "UI load or snapshot timed out"))
