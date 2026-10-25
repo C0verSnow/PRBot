@@ -109,7 +109,9 @@ window.__uiCheckResult = 'pending';
   content.scrollTop = 0;
   await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
   window.__uiCheckResult = 'ok';
-})().catch(error => { window.__uiCheckResult = 'failed:' + error.message + ' ' + (error.stack || ''); });
+})().catch(error => {
+  window.__uiCheckResult = 'failed:' + error.message + ' ' + (error.stack || '');
+});
 true;
 """,
             lambda result, error: poll_result(),
@@ -944,7 +946,9 @@ true;
   assert(field('model-help').textContent.includes('Loaded 1'), 'Timeout retry did not recover');
   assert(!/[\u4e00-\u9fff]/.test(document.body.innerText), 'Non-English product copy');
   window.__uiCheckResult = 'ok';
-})().catch(error => { window.__uiCheckResult = 'failed:' + error.message + ' ' + (error.stack || ''); });
+})().catch(error => {
+  window.__uiCheckResult = 'failed:' + error.message + ' ' + (error.stack || '');
+});
 true;
 """,
             lambda result, error: poll_result(),
