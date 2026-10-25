@@ -214,6 +214,20 @@ true;
     for (let count = 0; count < 300; count++) { if (predicate()) return; await tick(); }
     throw new Error('Native response timed out');
   };
+  // Measure actual WebKit scroll geometry, rather than infer it from CSS names.
+  const checkViewport = () => {
+    const root = document.scrollingElement;
+    root.scrollTop = root.scrollHeight;
+    assert(root.scrollTop === 0 && root.scrollHeight <= innerHeight + 1,
+      `Blank document scroll: top=${root.scrollTop}, height=${root.scrollHeight}, viewport=${innerHeight}`);
+    const main = document.querySelector('main');
+    main.scrollTop = main.scrollHeight;
+    const tail = main.lastElementChild.getBoundingClientRect().bottom;
+    assert(tail >= main.getBoundingClientRect().bottom - 1,
+      `Blank main scroll: content ends at ${tail}`);
+    main.scrollTop = 0;
+  };
+  checkViewport();
   assert(field('send').disabled, 'Empty submission enabled');
   const handler = window.webkit.messageHandlers.prbot;
   const originalPost = handler.postMessage;
@@ -670,6 +684,7 @@ true;
   assert(document.querySelector('.task-status').textContent.includes(fixtureTask.id),
     'Current task selection does not drive Codex status');
   window.receiveNative({ok:true,tasks:[fixtureTask],tasks_revision:999999999}); await tick();
+  checkViewport();
   document.querySelector('main').scrollTop = document.querySelector('main').scrollHeight;
   field('user').focus();
   assert(document.activeElement.id === 'user', 'Dialog did not restore focus');
