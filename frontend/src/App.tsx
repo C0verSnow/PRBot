@@ -31,7 +31,7 @@ export function App() {
     if (cancelOpen) cancelDialog.current?.showModal();
   }, [cancelOpen]);
   useEffect(() => {
-    if (result.id_token_result) send('models');
+    if (result.id_token_result?.applied) send('models');
   }, [result.id_token_result, send]);
   const accepted = useRef('');
   const selectedTask = result.tasks?.find(task => task.id === selected);

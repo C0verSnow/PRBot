@@ -402,13 +402,25 @@ true;
     {conversation_id:'legacy',message_id:'structured-result',task_id:'remote-task',
       role:'assistant',source:'desktop',sequence:4,content:JSON.stringify({
         summary:'Completed\\nSecond paragraph',validation:'Remote CI passed',
-        pr_url:'https://github.com/owner/repo/pull/21',delivery:{pr:{unexpected:true}}})}]});
+        pr_url:'https://github.com/owner/repo/pull/21',delivery:{pr:{unexpected:true}}})},
+    {conversation_id:'legacy',message_id:'invalid-future',task_id:'remote-task',role:'user',
+      source:'desktop',sequence:1e20,content:'Future timestamp remains readable'},
+    {conversation_id:'legacy',message_id:'invalid-past',task_id:'remote-task',role:'assistant',
+      source:'telegram',sequence:-1e20,content:'Past timestamp remains readable'}]});
   await tick();
   const cards = [...history.querySelectorAll('.message-card')];
-  assert(cards.length === 4 && cards.every(card => card.querySelector('.message-meta time')),
+  assert(cards.length === 6 && cards.every(card => card.querySelector('.message-meta time')),
     'Messages do not share role, channel and time metadata');
+  const invalidTimes = history.querySelectorAll('time:not([datetime])');
+  assert(invalidTimes.length === 2
+    && [...invalidTimes].every(time => time.textContent === 'Time unavailable'),
+    'Out-of-range history timestamps crashed or fabricated a date');
+  assert(history.textContent.includes('Future timestamp remains readable')
+    && history.textContent.includes('Past timestamp remains readable'),
+    'Invalid timestamps hid message content');
   assert(history.querySelector('[data-source="telegram"] pre code'), 'Code snippet not rendered');
-  assert(history.querySelector('[data-role="assistant"]').textContent.includes('Remote CI passed'),
+  assert([...history.querySelectorAll('[data-role="assistant"]')]
+    .some(card => card.textContent.includes('Remote CI passed')),
     'Structured result lost validation');
   assert(cards.every(card => card.scrollWidth <= card.clientWidth + 1), 'Long message overflow');
   // Sending from an archived session must use a fresh task UUID, never the remote ID.
@@ -517,6 +529,15 @@ true;
   assert(field('id-token').value === 'unsaved-connection-draft',
     'Connection response overwrote draft');
   handler.postMessage = intercepted;
+  let tokenModelRequests = 0;
+  const nativeSettingsPost = handler.postMessage;
+  handler.postMessage = body => {
+    if (body.action === 'models') {
+      tokenModelRequests++;
+      window.receiveNative({ok:true,completed_action:'models',bridge_id:body.bridge_id,
+        model_catalog:{models:[{id:'fixture-model',name:'Fixture',default:true}]}});
+    } else nativeSettingsPost.call(handler, body);
+  };
   const nativePaste = async element => {
     edit(element, ''); await tick(); element.focus();
     window.__pasteHandled = false; window.__pasteRequest = true;
@@ -532,6 +553,7 @@ true;
   // Wait for the visible result as well, rather than racing that second render.
   await waitFor(() => !fetchToken.disabled && field('id-token').value.startsWith('eyJ'));
   assert(field('id-token').value.startsWith('eyJ'), 'Fetch did not fill ID token');
+  assert(tokenModelRequests === 0, 'Read-only Fetch unexpectedly invoked the SDK');
   const fetched = field('id-token').value;
   edit(field('id-token'), 'ui-manual-id'); await tick();
   window.receiveNative({ok:false, message:'Cannot read Codex credentials. Check permissions.'});
@@ -543,11 +565,15 @@ true;
   await waitFor(() => !fetchToken.disabled && useToken().disabled);
   assert(field('id-token').value === 'ui-manual-id', 'Manual apply lost ID token');
   assert(useToken().disabled, 'Applied ID token still dirty');
+  await waitFor(() => tokenModelRequests === 1);
   fetchToken.click(); await tick();
   await waitFor(() => !fetchToken.disabled && field('id-token').value === fetched);
   assert(field('id-token').value === fetched, 'Fetch returned manual override');
+  assert(tokenModelRequests === 1, 'Fetching after Use token refreshed models');
   useToken().click(); await tick();
   await waitFor(() => !fetchToken.disabled && useToken().disabled);
+  await waitFor(() => tokenModelRequests === 2);
+  handler.postMessage = nativeSettingsPost;
   await select('Configuration');
   await waitFor(() => field('INFISICAL_URL') && !field('INFISICAL_URL').disabled);
   const examples = {INFISICAL_URL:'https://app.infisical.com',
@@ -694,23 +720,34 @@ true;
       pr_url:'',validation:'Waiting for your answer'}),
     events:Array.from({length:35},(_,index) => ({sequence:index,kind:'text',created:index+1,
       text:'Reviewed repository context · step ' + index}))};
+  fixtureTask.events.push(
+    {sequence:35,kind:'interaction',created:36,text:'Which branch should I use?'},
+    {sequence:36,kind:'status',created:37,text:'Waiting for an answer.'});
   window.receiveNative({ok:true,tasks:[JSON.parse(JSON.stringify(fixtureTask))],
     tasks_revision:999999999}); await tick();
   document.querySelector('[data-session="ui-waiting-task"]').click(); await tick();
   assert(document.querySelector('.task-status').dataset.state === 'needs_clarification',
     'Task animation is not driven by task state');
   const feed = document.querySelector('.execution-feed');
+  const question = [...feed.querySelectorAll('.message-card')]
+    .find(card => card.textContent.includes('Which branch should I use?'));
+  assert(question?.dataset.role === 'assistant'
+    && question.querySelector('.message-meta strong').textContent === 'Codex',
+    'Codex clarification was mislabeled as System');
+  assert([...feed.querySelectorAll('[data-role="system"]')]
+    .some(card => card.textContent.includes('Waiting for an answer.')),
+    'Runtime status was mislabeled as Codex');
   feed.scrollTop = 0; feed.dispatchEvent(new Event('scroll')); await tick();
   field('draft').focus();
   const draftValue = field('draft').value;
-  fixtureTask.events.push({sequence:36,kind:'text',created:36,text:'Ready for your answer.'});
+  fixtureTask.events.push({sequence:37,kind:'text',created:38,text:'Ready for your answer.'});
   window.receiveNative({ok:true,tasks:[JSON.parse(JSON.stringify(fixtureTask))],
     tasks_revision:999999999}); await tick();
   assert(feed.scrollTop === 0, 'New feedback interrupted historical reading');
   assert(document.activeElement === field('draft') && field('draft').value === draftValue,
     'Feedback changed composer focus or text');
   feed.scrollTop = feed.scrollHeight; feed.dispatchEvent(new Event('scroll')); await tick();
-  fixtureTask.events.push({sequence:37,kind:'text',created:37,text:'Task safely paused.'});
+  fixtureTask.events.push({sequence:38,kind:'text',created:39,text:'Task safely paused.'});
   window.receiveNative({ok:true,tasks:[JSON.parse(JSON.stringify(fixtureTask))],
     tasks_revision:999999999}); await tick();
   assert(feed.scrollHeight - feed.scrollTop - feed.clientHeight < 2,

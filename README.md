@@ -23,6 +23,10 @@ Text and fenced code are readable in both live and archived views; structured re
 validation and delivery details. See [Issue #21 implementation and evidence](docs/Issue21-模型与消息滚动.md)
 for the scroll regression scenarios and validation limits.
 
+PR #22 follow-up review also preserves read-only ID token fetching, labels Codex clarification
+events correctly, and keeps messages readable when saved timestamps are out of range.
+See [the full-branch review](docs/PR22-全面复盘.md) for scope and verification evidence.
+
 ## Use
 
 1. Download the DMG artifact from a successful [remote CI run](https://github.com/C0verSnow/PRBot/actions), move PRBot.app to Applications and open it. Current development builds use an ad hoc signature and are not notarized.

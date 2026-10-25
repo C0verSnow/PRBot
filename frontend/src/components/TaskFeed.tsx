@@ -23,7 +23,7 @@ export function TaskFeed({ task, send, busy, archived = false, history = false, 
       const node = feed.current;
       if (node) follow.current = node.scrollHeight - node.scrollTop - node.clientHeight < 64;
     }}>
-      {!history && task.events?.map(event => <MessageCard key={event.sequence} role={event.kind === 'text' ? 'assistant' : 'system'} source={task.source} created={event.created} content={event.text} send={send} busy={busy} />)}
+      {!history && task.events?.map(event => <MessageCard key={event.sequence} role={['text', 'interaction'].includes(event.kind) ? 'assistant' : 'system'} source={task.source} created={event.created} content={event.text} send={send} busy={busy} />)}
     </div>
     {task.result && !archived && <div className="mt-3"><MessageCard role="assistant" source={task.source} created={task.changed_at || task.created_at} content={task.result} send={send} busy={busy} /></div>}
     {task.status === 'needs_clarification' && task.source === 'telegram' && <p className="mt-3 text-sm">Reply to this task in Telegram to continue.</p>}
