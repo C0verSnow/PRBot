@@ -13,6 +13,8 @@ hdiutil verify dist/PRBot-v0.1.0-macos-arm64.dmg
 ditto "$MOUNT/PRBot.app" "$TEST_HOME/PRBot.app"
 BIN="$TEST_HOME/PRBot.app/Contents/MacOS/PRBot"
 [[ -f "$MOUNT/.env.example" ]]
+cmp README.md "$MOUNT/README.md"
+cmp .env.example "$MOUNT/.env.example"
 [[ -f "$TEST_HOME/PRBot.app/Contents/Resources/.env.example" ]]
 # Empty HOME must halt with an actionable Infisical bootstrap error, without network.
 VERSION="$(env -i HOME="$TEST_HOME" PATH=/usr/bin:/bin "$BIN" version)"

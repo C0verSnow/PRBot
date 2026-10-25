@@ -38,7 +38,9 @@ See [the full-branch review](docs/PR22-全面复盘.md) for scope and verificati
 5. GitHub uses the host Git credential provider, or `GITHUB_TOKEN` from Infisical. No `gh` installation is required. The account must have the target repository permissions needed for the requested changes.
 6. Open GitHub workspace and enter a repository, Issue or Pull Request link plus a non-empty requirement (up to 12,000 characters). The arrow sends it; URL type is detected automatically. New creates an independent session without stopping other work. Cancel confirms discarding an unsent draft. During queued/running tasks the arrow becomes Stop; the stopping state remains until process cleanup finishes. Expand Chat History in the sidebar to revisit saved sessions. Private chat opens a composer without a GitHub link. Waiting tasks use Continue task to answer in their original context.
 
-[使用手册](使用手册.md) · [Configuration and migration](docs/任务配置.md) · [Verification record](docs/验收记录.md)
+The DMG includes this `README.md` and `.env.example` alongside the app. See the Use section above
+for installation and configuration, and [DMG packaging and verification](docs/Issue23-DMG打包修复.md)
+for the packaging checks and remote CI evidence.
 
 ## Execution and persistence
 
