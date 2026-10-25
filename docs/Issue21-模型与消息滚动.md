@@ -33,7 +33,14 @@ https://github.com/C0verSnow/PRBot/actions/runs/40157636359
 - ui-check：模型目录渲染、选定模型提交、提交中锁定、重试保留、New 恢复默认；桌面 / Telegram / Codex 卡片、时间、代码和异常结构化数据；短内容与长任务的真实滚动高度；原生像素滚轮经过 WebKit responder，验证确实滚动后才检查边界；用户查看旧日志不跳转、回到底部继续跟随；最小窗口设置表单能滚到保存按钮。
 - 源码 WebKit、DMG 安装、打包 WebKit 及 SDK 内置运行时沿用已有 CI。
 
-最终运行编号与结论待 CI 完成后补充。
+最终业务代码为 `dd11890`，远端 [Actions 40158089013](https://github.com/C0verSnow/PRBot/actions/runs/40158089013) 全部必需检查通过：
+
+- 297 项 Python 测试，Ruff、TypeScript 和前端构建通过。
+- 源码和安装包内 WebKit 均通过默认及 760×580 双尺寸验收，UI JSON 都为 `ok:true`。原生像素滚轮实际推动主内容后验证边界，日志滚到末端不带动主内容；最小窗口仍能访问设置保存按钮。已实际查看首页、任务页和最小窗口截图。
+- DMG 校验、挂载复制、内置 SDK 运行时及工作区配置检查通过。
+- [源码截图与验收 JSON](https://github.com/C0verSnow/PRBot/actions/runs/40158089013/artifacts/12585578143)、[安装包内截图与验收 JSON](https://github.com/C0verSnow/PRBot/actions/runs/40158089013/artifacts/12585263855)、[DMG 下载](https://github.com/C0verSnow/PRBot/actions/runs/40158089013/artifacts/12585428648)。
+
+Issue #21 已关闭，交付 PR 为 [#22](https://github.com/C0verSnow/PRBot/pull/22)，未自动合并。最后文档收尾不修改业务代码，最新分支状态以 PR Checks 为准。
 
 ## 明确的边界
 
