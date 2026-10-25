@@ -185,7 +185,9 @@ true;
 
     def wheel_poll():
         if not finished:
-            web.evaluateJavaScript_completionHandler_("window.__wheelRequest || null", wheel_request)
+            web.evaluateJavaScript_completionHandler_(
+                "window.__wheelRequest || null", wheel_request
+            )
 
     def poll():
         if finished:
