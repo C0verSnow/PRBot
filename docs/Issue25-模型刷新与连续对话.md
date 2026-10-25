@@ -42,4 +42,12 @@
 
 macOS WebKit 操作覆盖：点击刷新立即等待、防重入、普通轮询不清除等待、失败保留目录、空列表可重试、相同目录成功提示、选模型并发送、单一对话滚动、阅读位置保持、贴近底部跟随、用户主动验证的等待/失败/重试/成功、验证后任务状态不变、桥接发送失败恢复按钮。现有 CI 还执行 TypeScript 检查、前端构建、Python 全套测试、原生窗口截图、DMG 打包及安装包检查。
 
-修复后的远端结果待 CI 返回后补充。模拟目录和 GitHub 响应不代表真实账户每个模型都可用；本次不使用用户凭据发起付费模型推理。
+修复后远端验收已通过：[运行 40188814909](https://github.com/C0verSnow/PRBot/actions/runs/40188814909)，代码提交 56e4355。
+
+- Python 全套 318 个测试通过，0 失败、0 跳过；依赖检查、ruff、TypeScript 和前端构建通过。
+- 原生 WebKit 操作通过，标准窗口与最小窗口均有截图：[源码界面证据](https://github.com/C0verSnow/PRBot/actions/runs/40188814909/artifacts/12596537650)。
+- DMG 构建、挂载后安装包验证及安装包内 WebKit 检查均通过：[安装包界面证据](https://github.com/C0verSnow/PRBot/actions/runs/40188814909/artifacts/12596687722)、[DMG 下载](https://github.com/C0verSnow/PRBot/actions/runs/40188814909/artifacts/12596682568)。
+- 联调中补齐原生焦点防滚动等待与心跳状态隔离，避免测试还未开始向上阅读就被焦点拉回，或测试状态被真实轮询覆盖。主滚动区关闭浏览器滚动锚定，跟随逻辑保持由页面统一控制。
+- [PR #26](https://github.com/C0verSnow/PRBot/pull/26) 已提交，issue #25 已按要求关闭，PR 保持打开等待审阅。
+
+模拟目录和 GitHub 响应不代表真实账户每个模型都可用；本次未使用用户凭据发起付费模型推理。可选的真实 provider acceptance 作业未启用，不能把模拟操作验收当作生产账户的模型授权证明。

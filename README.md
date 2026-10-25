@@ -13,7 +13,7 @@ Desktop / Telegram → shared task service → Codex (Full Access) → GitHub PR
 The composer includes a model picker and **Refresh models**. Choices come from the bundled
 `openai-codex==0.163.0` SDK's current account catalog, with hidden and non-text models excluded.
 **Codex default** preserves existing behavior. The catalog can be cached by Codex, so its entries
-are labeled as catalog choices, not guaranteed account entitlements. The selected model is
+are catalog choices rather than guaranteed account entitlements. The selected model is
 validated against the catalog before acceptance and execution; an actual inference rejection is
 reported without automatic fallback. A selected task model is frozen in its durable payload and
 survives retry, restart and clarification answers. Changing the model starts a new request identity.
