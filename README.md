@@ -8,6 +8,27 @@ Desktop / Telegram → shared task service → Codex (Full Access) → GitHub PR
                     Upstash history
 ```
 
+## Model selection and conversation display
+
+The composer includes a model picker and **Refresh models**. Choices come from the bundled
+`openai-codex==0.163.0` SDK's current account catalog, with hidden and non-text models excluded.
+**Codex default** preserves existing behavior. The catalog can be cached by Codex, so its entries
+are labeled as catalog choices, not guaranteed account entitlements. The selected model is
+validated against the catalog before acceptance and execution; an actual inference rejection is
+reported without automatic fallback. A selected task model is frozen in its durable payload and
+survives retry, restart and clarification answers. Changing the model starts a new request identity.
+
+Desktop, Telegram and Codex messages share one card component with role, channel and timestamp.
+Text and fenced code are readable in both live and archived views; structured results keep their
+validation and delivery details. See [Issue #21 implementation and evidence](docs/Issue21-模型与消息滚动.md)
+for the scroll regression scenarios and validation limits.
+
+PR #22 follow-up review also preserves read-only ID token fetching, labels Codex clarification
+events correctly, and keeps messages readable when saved timestamps are out of range.
+Delivery verification also recognizes a cancelled duplicate workflow only when a newer run
+on the same commit has a proven successful replacement for that job; other failures still block.
+See [the full-branch review](docs/PR22-全面复盘.md) for scope and verification evidence.
+
 ## Use
 
 1. Download the DMG artifact from a successful [remote CI run](https://github.com/C0verSnow/PRBot/actions), move PRBot.app to Applications and open it. Current development builds use an ad hoc signature and are not notarized.

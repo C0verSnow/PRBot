@@ -8,6 +8,7 @@ import sys
 from pathlib import Path
 from threading import Thread
 
+from prbot.codex_adapter import SDKFailure
 from prbot.config import ConfigError
 
 
@@ -238,6 +239,7 @@ def show(check_output=None):
                     "history",
                     "retry_save",
                     "tasks",
+                    "models",
                 }
             )
             if (
@@ -255,6 +257,7 @@ def show(check_output=None):
                 "connections",
                 "configuration",
                 "cancel_task",
+                "models",
             }
             if action in self.inflight:
                 return
@@ -314,6 +317,13 @@ def show(check_output=None):
                         feedback = perform_action(action)
                     elif action in SETTINGS_ACTIONS:
                         feedback, extra = settings_request(action, request)
+                    elif action == "models":
+                        from prbot.codex_adapter import CodexAdapter
+                        from prbot.execution_setup import codex_login
+
+                        extra["model_catalog"] = asyncio.run(
+                            CodexAdapter(codex_login()).list_models()
+                        )
                     elif action == "cancel_task":
                         import time
 
@@ -341,6 +351,7 @@ def show(check_output=None):
                                     request.get("mode"),
                                     request.get("link"),
                                     request.get("text"),
+                                    model=request.get("model"),
                                 )
                             )
                             extra["accepted"] = task
@@ -366,7 +377,9 @@ def show(check_output=None):
                             extra["history"] = dict(
                                 asyncio.run(
                                     app_service.desktop_history(
-                                        actor, mode, request.get("cursor", "0"),
+                                        actor,
+                                        mode,
+                                        request.get("cursor", "0"),
                                         session=request.get("session", ""),
                                     )
                                 ),
@@ -378,17 +391,40 @@ def show(check_output=None):
                         extra["tasks_revision"] = time.monotonic()
                         extra["tasks"] = app_service.visible_tasks(actor)
                     AppHelper.callAfter(finish, feedback, True, extra)
-                except ConfigError as error:
-                    extra = {"history_error": {
-                        "request_id": request.get("request_id"), "message": str(error)
-                    }} if action == "history" else {}
+                except (ConfigError, SDKFailure) as error:
+                    extra = (
+                        {"model_catalog": {"models": [], "error": str(error)}}
+                        if action == "models"
+                        else {
+                            "history_error": {
+                                "request_id": request.get("request_id"),
+                                "message": str(error),
+                            }
+                        }
+                        if action == "history"
+                        else {}
+                    )
                     AppHelper.callAfter(finish, str(error), False, extra)
                 except Exception:
                     AppHelper.callAfter(
-                        finish, "Operation failed. Check connections and retry.", False,
-                        {"history_error": {"request_id": request.get("request_id"),
-                         "message": "History unavailable. Retry loading messages."}}
-                        if action == "history" else {},
+                        finish,
+                        "Operation failed. Check connections and retry.",
+                        False,
+                        {
+                            "history_error": {
+                                "request_id": request.get("request_id"),
+                                "message": "History unavailable. Retry loading messages.",
+                            }
+                        }
+                        if action == "history"
+                        else {
+                            "model_catalog": {
+                                "models": [],
+                                "error": "Models unavailable. Check Codex sign-in and retry.",
+                            }
+                        }
+                        if action == "models"
+                        else {},
                     )
 
             Thread(target=work, daemon=True).start()

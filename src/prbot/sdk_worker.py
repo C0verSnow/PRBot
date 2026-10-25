@@ -47,6 +47,26 @@ def safe_text(text, request):
     return redact(text, secrets)[:8000]
 
 
+def catalog(codex):
+    """Expose only visible text models from the SDK's current account catalog."""
+    page = codex.models(include_hidden=False)
+    models = []
+    seen = set()
+    for item in page.data:
+        if item.hidden or (
+            item.input_modalities is not None and "text" not in item.input_modalities
+        ):
+            continue
+        if item.model and item.model not in seen:
+            seen.add(item.model)
+            models.append({"id": item.model, "name": item.display_name, "default": item.is_default})
+    # The pinned high-level SDK does not expose pagination. Never silently claim
+    # that an incomplete catalog is the full set of selectable models.
+    if page.next_cursor:
+        raise RuntimeError("Model catalog is incomplete; refresh models or use the default")
+    return models
+
+
 def _run():
     global _stage, _runtime_path, _workspace_path
     from codex_cli_bin import bundled_codex_path
@@ -96,24 +116,41 @@ def _run():
                     sandbox=Sandbox.full_access,
                     approval_mode=ApprovalMode.deny_all,
                 )
-                emit({
-                    "type": "runtime", "initialized": codex.metadata is not None,
-                    "thread_started": bool(thread.id),
-                })
+                emit(
+                    {
+                        "type": "runtime",
+                        "initialized": codex.metadata is not None,
+                        "thread_started": bool(thread.id),
+                    }
+                )
                 return
             if request["prompt"] == "__prbot_account_check__":
                 _stage = "account"
                 # Startup is a local account check, not a forced refresh/entitlement probe.
                 authenticated = codex.account(refresh_token=False).account is not None
-                emit({
-                    "type": "result", "result": {"authenticated": authenticated},
-                    "auth": auth.read_text(),
-                })
+                emit(
+                    {
+                        "type": "result",
+                        "result": {"authenticated": authenticated},
+                        "auth": auth.read_text(),
+                    }
+                )
                 return
             _stage = "account"
             if codex.account().account is None:
                 raise RuntimeError("Codex login required")
+            if request["prompt"] == "__prbot_models__":
+                _stage = "models"
+                models = catalog(codex)
+                emit({"type": "result", "result": {"models": models}, "auth": auth.read_text()})
+                return
             _stage = "turn"
+            model = request.get("model")
+            if model is not None:
+                if not isinstance(model, str) or not model:
+                    raise ValueError("Invalid model")
+                if model not in {item["id"] for item in catalog(codex)}:
+                    raise ValueError("Selected model unavailable")
             try:
                 task_prompt = json.loads(request["prompt"])
             except (ValueError, TypeError):
@@ -122,6 +159,7 @@ def _run():
                 isinstance(task_prompt, dict) and task_prompt.get("task", {}).get("kind") == "chat"
             )
             thread = codex.thread_start(
+                **({"model": model} if model else {}),
                 cwd=str(workspace),
                 ephemeral=True,
                 sandbox=Sandbox.read_only if private_chat else Sandbox.full_access,
@@ -138,6 +176,8 @@ def _run():
             completed = False
             for event in turn.stream():
                 # Do not forward raw RPC payloads, commands, reasoning or tool output.
+                if event.method == "model/rerouted" and model:
+                    raise RuntimeError("Selected model was rerouted; task stopped without fallback")
                 if event.method == "item/started":
                     emit({"type": "progress", "text": "Codex is working on the task."})
                 elif event.method == "item/completed":
@@ -158,7 +198,11 @@ def _run():
                 elif event.method == "turn/completed":
                     completed = event.payload.turn.status.value == "completed"
             if not completed or (not final_response and not questions):
-                raise RuntimeError("Codex turn did not complete")
+                raise RuntimeError(
+                    "Selected model call failed; no fallback used"
+                    if model
+                    else "Codex turn did not complete"
+                )
             result = (
                 {
                     "outcome": "needs_clarification",
@@ -217,6 +261,8 @@ def run():
             )
         ):
             kind = "authentication"
+        elif "model" in message and _stage in {"turn", "models"}:
+            kind = "model"
         elif "timed out" in message or "timeout" in message:
             kind = "timeout"
         elif "connection" in message or "network" in message:

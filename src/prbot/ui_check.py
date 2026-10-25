@@ -68,6 +68,10 @@ def schedule_check(web, output):
 window.__uiCheckResult = 'pending';
 (async () => {
   const assert = (value, message) => { if (!value) throw new Error(message); };
+  const root = document.scrollingElement;
+  root.scrollTop = root.scrollHeight;
+  assert(root.scrollTop === 0 && root.scrollHeight <= innerHeight + 1,
+    'Resizing created blank document scroll');
   document.getElementById('user').click();
   await new Promise(resolve => setTimeout(resolve, 80));
   const bounds = document.getElementById('settings').getBoundingClientRect();
@@ -166,6 +170,44 @@ true;
         if not finished:
             web.evaluateJavaScript_completionHandler_("!!window.__pasteRequest", paste_request)
 
+    def wheel_request(value, error):
+        if finished:
+            return
+        if not error and value:
+            import Quartz
+
+            # Dispatch an actual pixel scroll event through WebKit's native responder.
+            # A JavaScript WheelEvent alone does not perform default scrolling.
+            event = Quartz.CGEventCreateScrollWheelEvent(
+                None, Quartz.kCGScrollEventUnitPixel, 1, int(value["delta"])
+            )
+            point = (
+                value["x"],
+                value["y"] if web.isFlipped() else web.bounds().size.height - value["y"],
+            )
+            screen = web.window().convertPointToScreen_(web.convertPoint_toView_(point, None))
+            screen_height = AppKit.NSScreen.screens()[0].frame().size.height
+            Quartz.CGEventSetLocation(event, (screen.x, screen_height - screen.y))
+            Quartz.CGEventSetIntegerValueField(
+                event, Quartz.kCGMouseEventWindowUnderMousePointer, web.window().windowNumber()
+            )
+            native = AppKit.NSEvent.eventWithCGEvent_(event)
+            # WindowServer assigns the event to the correct window/responder.
+            # Calling WKWebView.scrollWheel_ directly lacks that window routing.
+            Quartz.CGWarpMouseCursorPosition((screen.x, screen_height - screen.y))
+            Quartz.CGEventPost(Quartz.kCGHIDEventTap, event)
+            info = {"delta": native.scrollingDeltaY(), "window": native.windowNumber()}
+            web.evaluateJavaScript_completionHandler_(
+                "window.__wheelRequest = null; window.__wheelInfo = " + json.dumps(info), None
+            )
+        AppHelper.callLater(0.05, wheel_poll)
+
+    def wheel_poll():
+        if not finished:
+            web.evaluateJavaScript_completionHandler_(
+                "window.__wheelRequest || null", wheel_request
+            )
+
     def poll():
         if finished:
             return
@@ -214,6 +256,25 @@ true;
     for (let count = 0; count < 300; count++) { if (predicate()) return; await tick(); }
     throw new Error('Native response timed out');
   };
+  // Measure actual WebKit scroll geometry, rather than infer it from CSS names.
+  const checkViewport = () => {
+    const root = document.scrollingElement;
+    root.scrollTop = root.scrollHeight;
+    assert(root.scrollTop === 0 && root.scrollHeight <= innerHeight + 1,
+      `Blank document scroll: top=${root.scrollTop}, height=${root.scrollHeight}; ` +
+      JSON.stringify(['html','body','#root','#root > div','main'].map(selector => {
+        const node = document.querySelector(selector), rect = node.getBoundingClientRect();
+        return [selector, rect.top, rect.height, node.scrollHeight,
+          getComputedStyle(node).overflowY, getComputedStyle(node).position];
+      })));
+    const main = document.querySelector('main');
+    main.scrollTop = main.scrollHeight;
+    const tail = main.lastElementChild.getBoundingClientRect().bottom;
+    assert(main.scrollTop === 0 || tail >= main.getBoundingClientRect().bottom - 1,
+      `Blank main scroll: content ends at ${tail}`);
+    main.scrollTop = 0;
+  };
+  checkViewport();
   assert(field('send').disabled, 'Empty submission enabled');
   const handler = window.webkit.messageHandlers.prbot;
   const originalPost = handler.postMessage;
@@ -224,6 +285,16 @@ true;
     window.receiveNative({ok:true,completed_action:action,
       ...(request ? {bridge_id:request.bridge_id} : {}),...data});
   };
+  // Catalog options come from native SDK discovery, never a hardcoded model list.
+  const chooseModel = value => {
+    Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')
+      .set.call(field('model'), value);
+    field('model').dispatchEvent(new Event('change', {bubbles:true}));
+  };
+  complete('models', {model_catalog:{models:[{id:'fixture-model',name:'Fixture',default:true}]}});
+  await tick();
+  assert(field('model').options.length === 2, 'Model catalog not rendered');
+  chooseModel('fixture-model'); await tick();
   // Drain a pre-existing history request, then queued correlated requests.
   complete('history'); await tick(); complete('history'); await tick();
   for (const link of ['https://github.com/owner/repo',
@@ -237,6 +308,8 @@ true;
   field('composer').requestSubmit(); field('composer').requestSubmit(); await tick();
   const sent = requests.filter(request => request.action === 'submit_message');
   assert(sent.length === 1 && sent[0].mode === 'GitHub', 'Duplicate or wrong routing');
+  assert(sent[0].model === 'fixture-model', 'Selected model did not reach native submission');
+  assert(field('model').disabled, 'Model changed while submission was pending');
   assert(field('send').getAttribute('aria-label') === 'Submitting…');
   assert(document.querySelector('[data-state="submitting"]'), 'Submitting state missing');
   assert(document.querySelector('[aria-label="Conversation history"]').textContent.includes('fix'),
@@ -248,9 +321,11 @@ true;
   field('composer').requestSubmit(); await tick();
   const retry = requests.filter(request => request.action === 'submit_message').at(-1);
   assert(retry.request_id === sent[0].request_id, 'Retry changed task ID');
+  assert(retry.model === sent[0].model, 'Retry changed selected model');
   // New during submission must not stop the task or let a late acceptance steal selection.
   field('new-session').click(); await tick();
   assert(field('draft').value === '' && field('target-link').value === '');
+  assert(field('model').value === '', 'New task did not restore default model');
   const first = {id:retry.request_id,mode:'Pull Request',source:'desktop',status:'queued',
     conversation_id:retry.request_id,created_at:1,changed_at:1,
     user_text:'fix',title:'fix',events:[]};
@@ -318,6 +393,36 @@ true;
     conversation_id:'legacy',message_id:'older',task_id:'remote-task',role:'user',
     source:'desktop',sequence:2,content:'More archived context'}]}); await tick();
   assert(history.querySelectorAll('.history-message').length === 2, 'History page not appended');
+  [...document.querySelectorAll('aside button')]
+    .find(button => button.textContent === 'Refresh history').click(); await tick();
+  respondHistory(latestHistory(),{reset:false,messages:[{
+    conversation_id:'legacy',message_id:'telegram-code',task_id:'remote-task',role:'user',
+    source:'telegram',sequence:3,
+    content:'Telegram request\\n```text\\n' + 'x'.repeat(900) + '\\n```'},
+    {conversation_id:'legacy',message_id:'structured-result',task_id:'remote-task',
+      role:'assistant',source:'desktop',sequence:4,content:JSON.stringify({
+        summary:'Completed\\nSecond paragraph',validation:'Remote CI passed',
+        pr_url:'https://github.com/owner/repo/pull/21',delivery:{pr:{unexpected:true}}})},
+    {conversation_id:'legacy',message_id:'invalid-future',task_id:'remote-task',role:'user',
+      source:'desktop',sequence:1e20,content:'Future timestamp remains readable'},
+    {conversation_id:'legacy',message_id:'invalid-past',task_id:'remote-task',role:'assistant',
+      source:'telegram',sequence:-1e20,content:'Past timestamp remains readable'}]});
+  await tick();
+  const cards = [...history.querySelectorAll('.message-card')];
+  assert(cards.length === 6 && cards.every(card => card.querySelector('.message-meta time')),
+    'Messages do not share role, channel and time metadata');
+  const invalidTimes = history.querySelectorAll('time:not([datetime])');
+  assert(invalidTimes.length === 2
+    && [...invalidTimes].every(time => time.textContent === 'Time unavailable'),
+    'Out-of-range history timestamps crashed or fabricated a date');
+  assert(history.textContent.includes('Future timestamp remains readable')
+    && history.textContent.includes('Past timestamp remains readable'),
+    'Invalid timestamps hid message content');
+  assert(history.querySelector('[data-source="telegram"] pre code'), 'Code snippet not rendered');
+  assert([...history.querySelectorAll('[data-role="assistant"]')]
+    .some(card => card.textContent.includes('Remote CI passed')),
+    'Structured result lost validation');
+  assert(cards.every(card => card.scrollWidth <= card.clientWidth + 1), 'Long message overflow');
   // Sending from an archived session must use a fresh task UUID, never the remote ID.
   edit(field('target-link'),'https://github.com/owner/repo');
   edit(field('draft'),'New task from saved context'); await tick();
@@ -424,6 +529,15 @@ true;
   assert(field('id-token').value === 'unsaved-connection-draft',
     'Connection response overwrote draft');
   handler.postMessage = intercepted;
+  let tokenModelRequests = 0;
+  const nativeSettingsPost = handler.postMessage;
+  handler.postMessage = body => {
+    if (body.action === 'models') {
+      tokenModelRequests++;
+      window.receiveNative({ok:true,completed_action:'models',bridge_id:body.bridge_id,
+        model_catalog:{models:[{id:'fixture-model',name:'Fixture',default:true}]}});
+    } else nativeSettingsPost.call(handler, body);
+  };
   const nativePaste = async element => {
     edit(element, ''); await tick(); element.focus();
     window.__pasteHandled = false; window.__pasteRequest = true;
@@ -439,6 +553,7 @@ true;
   // Wait for the visible result as well, rather than racing that second render.
   await waitFor(() => !fetchToken.disabled && field('id-token').value.startsWith('eyJ'));
   assert(field('id-token').value.startsWith('eyJ'), 'Fetch did not fill ID token');
+  assert(tokenModelRequests === 0, 'Read-only Fetch unexpectedly invoked the SDK');
   const fetched = field('id-token').value;
   edit(field('id-token'), 'ui-manual-id'); await tick();
   window.receiveNative({ok:false, message:'Cannot read Codex credentials. Check permissions.'});
@@ -450,11 +565,15 @@ true;
   await waitFor(() => !fetchToken.disabled && useToken().disabled);
   assert(field('id-token').value === 'ui-manual-id', 'Manual apply lost ID token');
   assert(useToken().disabled, 'Applied ID token still dirty');
+  await waitFor(() => tokenModelRequests === 1);
   fetchToken.click(); await tick();
   await waitFor(() => !fetchToken.disabled && field('id-token').value === fetched);
   assert(field('id-token').value === fetched, 'Fetch returned manual override');
+  assert(tokenModelRequests === 1, 'Fetching after Use token refreshed models');
   useToken().click(); await tick();
   await waitFor(() => !fetchToken.disabled && useToken().disabled);
+  await waitFor(() => tokenModelRequests === 2);
+  handler.postMessage = nativeSettingsPost;
   await select('Configuration');
   await waitFor(() => field('INFISICAL_URL') && !field('INFISICAL_URL').disabled);
   const examples = {INFISICAL_URL:'https://app.infisical.com',
@@ -601,23 +720,34 @@ true;
       pr_url:'',validation:'Waiting for your answer'}),
     events:Array.from({length:35},(_,index) => ({sequence:index,kind:'text',created:index+1,
       text:'Reviewed repository context · step ' + index}))};
+  fixtureTask.events.push(
+    {sequence:35,kind:'interaction',created:36,text:'Which branch should I use?'},
+    {sequence:36,kind:'status',created:37,text:'Waiting for an answer.'});
   window.receiveNative({ok:true,tasks:[JSON.parse(JSON.stringify(fixtureTask))],
     tasks_revision:999999999}); await tick();
   document.querySelector('[data-session="ui-waiting-task"]').click(); await tick();
   assert(document.querySelector('.task-status').dataset.state === 'needs_clarification',
     'Task animation is not driven by task state');
   const feed = document.querySelector('.execution-feed');
+  const question = [...feed.querySelectorAll('.message-card')]
+    .find(card => card.textContent.includes('Which branch should I use?'));
+  assert(question?.dataset.role === 'assistant'
+    && question.querySelector('.message-meta strong').textContent === 'Codex',
+    'Codex clarification was mislabeled as System');
+  assert([...feed.querySelectorAll('[data-role="system"]')]
+    .some(card => card.textContent.includes('Waiting for an answer.')),
+    'Runtime status was mislabeled as Codex');
   feed.scrollTop = 0; feed.dispatchEvent(new Event('scroll')); await tick();
   field('draft').focus();
   const draftValue = field('draft').value;
-  fixtureTask.events.push({sequence:36,kind:'text',created:36,text:'Ready for your answer.'});
+  fixtureTask.events.push({sequence:37,kind:'text',created:38,text:'Ready for your answer.'});
   window.receiveNative({ok:true,tasks:[JSON.parse(JSON.stringify(fixtureTask))],
     tasks_revision:999999999}); await tick();
   assert(feed.scrollTop === 0, 'New feedback interrupted historical reading');
   assert(document.activeElement === field('draft') && field('draft').value === draftValue,
     'Feedback changed composer focus or text');
   feed.scrollTop = feed.scrollHeight; feed.dispatchEvent(new Event('scroll')); await tick();
-  fixtureTask.events.push({sequence:37,kind:'text',created:37,text:'Task safely paused.'});
+  fixtureTask.events.push({sequence:38,kind:'text',created:39,text:'Task safely paused.'});
   window.receiveNative({ok:true,tasks:[JSON.parse(JSON.stringify(fixtureTask))],
     tasks_revision:999999999}); await tick();
   assert(feed.scrollHeight - feed.scrollTop - feed.clientHeight < 2,
@@ -670,6 +800,28 @@ true;
   assert(document.querySelector('.task-status').textContent.includes(fixtureTask.id),
     'Current task selection does not drive Codex status');
   window.receiveNative({ok:true,tasks:[fixtureTask],tasks_revision:999999999}); await tick();
+  checkViewport();
+  const mainScroll = document.querySelector('main');
+  const wheel = async (element, delta) => {
+    const bounds = element.getBoundingClientRect();
+    window.__wheelRequest = {x:bounds.left + 20,y:bounds.top + 20,delta};
+    await waitFor(() => !window.__wheelRequest);
+    await new Promise(resolve => setTimeout(resolve, 120));
+  };
+  mainScroll.scrollTop = 0;
+  await wheel(mainScroll, -900);
+  assert(mainScroll.scrollTop > 0,
+    'Native wheel did not scroll long task content: ' + JSON.stringify(window.__wheelInfo));
+  for (let count = 0; count < 4; count++) await wheel(mainScroll, -900);
+  assert(document.scrollingElement.scrollTop === 0, 'Native wheel escaped into blank document');
+  assert(mainScroll.scrollTop <= mainScroll.scrollHeight - mainScroll.clientHeight + 1,
+    'Native wheel exceeded actual content');
+  feed.scrollIntoView({block:'center'}); await tick();
+  feed.scrollTop = feed.scrollHeight; await tick();
+  const mainBeforeLogWheel = mainScroll.scrollTop;
+  await wheel(feed, -900);
+  assert(mainScroll.scrollTop === mainBeforeLogWheel, 'Log wheel chained to main scroll');
+  checkViewport();
   document.querySelector('main').scrollTop = document.querySelector('main').scrollHeight;
   field('user').focus();
   assert(document.activeElement.id === 'user', 'Dialog did not restore focus');
@@ -683,4 +835,5 @@ true;
 
     AppHelper.callLater(0.25, poll)
     AppHelper.callLater(0.25, paste_poll)
+    AppHelper.callLater(0.25, wheel_poll)
     AppHelper.callLater(75, lambda: finish(False, "UI load or snapshot timed out"))

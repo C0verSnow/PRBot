@@ -66,12 +66,50 @@ class GitHub:
         # A pending successor must finish before cancelled older runs are judged.
         if any(run["status"] != "completed" for run in runs):
             return False
+        # push and pull_request can run the same workflow on one commit. GitHub
+        # still lists the cancelled predecessor's jobs after its successor passes.
+        # Ignore only a cancelled job with a proven same-job replacement; a
+        # same-name failure from another workflow/status must remain a failure.
+        passed_jobs = {
+            (check.get("check_suite", {}).get("id"), check["name"])
+            for check in checks
+            if check["status"] == "completed" and check["conclusion"] == "success"
+            and check.get("check_suite", {}).get("id")
+        }
+        superseded = set()
+        for old in runs:
+            repository = old.get("head_repository", {}).get("id")
+            if (
+                old.get("head_sha") != sha or old.get("conclusion") != "cancelled"
+                or not repository
+                or not all(old.get(key) for key in (
+                    "workflow_id", "head_branch", "run_number", "check_suite_id"
+                ))
+            ):
+                continue
+            for new in runs:
+                if (
+                    new.get("head_sha") == sha
+                    and new.get("head_repository", {}).get("id") == repository
+                    and new.get("workflow_id") == old["workflow_id"]
+                    and new.get("head_branch") == old["head_branch"]
+                    and new.get("run_number", 0) > old["run_number"]
+                    and new.get("conclusion") == "success"
+                    and new.get("check_suite_id")
+                ):
+                    for name in required:
+                        if (new.get("check_suite_id"), name) in passed_jobs:
+                            superseded.add((old["check_suite_id"], name))
         # Check runs and commit statuses can share a name. Every applicable
         # result must pass; one success must never overwrite another failure.
         values = {}
         for status in reversed(statuses):
             values[status["context"]] = [status["state"]]
         for check in checks:
+            if check["conclusion"] == "cancelled" and (
+                check.get("check_suite", {}).get("id"), check["name"]
+            ) in superseded:
+                continue
             values.setdefault(check["name"], []).append(
                 check["conclusion"] if check["status"] == "completed" else "pending"
             )

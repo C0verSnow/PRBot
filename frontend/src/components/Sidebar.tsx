@@ -8,9 +8,9 @@ interface Props {
   onRefresh: () => void; tasks: Task[];
 }
 export function Sidebar({ active, onSelect, onSettings, user, expanded, onToggle, sessions, selected, onSession, counts, loading, error, onRefresh, tasks }: Props) {
-  return <aside aria-label="Task navigation" className="flex h-screen w-[252px] shrink-0 flex-col border-r border-line bg-sidebar px-3 pt-5 max-[940px]:w-[190px]">
+  return <aside aria-label="Task navigation" className="flex h-full min-h-0 w-[252px] shrink-0 flex-col border-r border-line bg-sidebar px-3 pt-5 max-[940px]:w-[190px]">
     <div className="flex items-center gap-3 px-3 pb-8 font-serif text-[27px]"><Icon name="brand" className="size-7 text-accent" />PRBot</div>
-    <nav className="min-h-0 flex-1 overflow-y-auto">
+    <nav className="sidebar-scroll min-h-0 flex-1 overflow-y-auto">
       {(['GitHub', 'Chat History'] as const).map(view => <button key={view} data-view={view} aria-current={active === view ? 'page' : undefined} onClick={() => onSelect(view)} className={`nav-item mb-1 ${active === view ? 'bg-[#eae8e2] text-ink' : ''}`}><Icon name={view === 'GitHub' ? 'code' : 'plus'} /><span>{view === 'GitHub' ? 'GitHub workspace' : 'Private chat'}</span></button>)}
       <button id="history-toggle" className="nav-item mt-5" aria-expanded={expanded} aria-controls="history-sessions" onClick={onToggle}><Icon name="chat" /><span className="flex-1">Chat History</span><span aria-hidden="true">{expanded ? '⌄' : '›'}</span></button>
       <div id="history-sessions" hidden={!expanded}>

@@ -150,7 +150,13 @@ class ConversationService:
             row = db.execute("SELECT * FROM requests WHERE id=?", (request_id,)).fetchone()
             return dict(row) if row else None
 
-    async def submit(self, request_id, actor, source, mode, link, text, *, archive_user=True):
+    async def model_catalog(self):
+        adapter = self.adapter or CodexAdapter(codex_login())
+        return await adapter.list_models()
+
+    async def submit(
+        self, request_id, actor, source, mode, link, text, *, archive_user=True, model=None
+    ):
         if (
             source not in {"desktop", "telegram"}
             or not isinstance(request_id, str)
@@ -159,6 +165,11 @@ class ConversationService:
             or not 1 <= len(text.strip()) <= 12000
         ):
             raise ConfigError("Enter a non-empty description of up to 12000 characters.")
+        if model is not None and (
+            not isinstance(model, str)
+            or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:/-]{0,199}", model)
+        ):
+            raise ConfigError("Invalid model. Refresh models and choose a listed model.")
         if mode == "Chat History" and source == "desktop":
             repo, kind, number = "", "chat", None
         else:
@@ -167,9 +178,7 @@ class ConversationService:
             mode = "Pull Request" if kind == "pull" else "Issue"
         # Each new desktop submission is an independent context. Legacy grouped
         # history and Telegram routing remain readable without migration.
-        conversation = (
-            request_id if source == "desktop" else self.conversation(actor, source, mode)
-        )
+        conversation = request_id if source == "desktop" else self.conversation(actor, source, mode)
         # Reserve the original request before remote I/O. Redis and SQLite must
         # agree on the winning payload even when retries overlap or a save fails.
         with self.db() as db:
@@ -185,12 +194,18 @@ class ConversationService:
                 return self.public(existing)
             if pending is None:
                 # Redact text only; credentials matching a path must not redirect work.
-                payload = json.dumps({
-                    "repo": repo, "kind": kind, "number": number, "link": link,
-                    "text": self.clean(text.strip()),
-                    "workspace_root": str(workspace_directory()),
-                    "configuration_file": str(env_path()),
-                })
+                payload = json.dumps(
+                    {
+                        "repo": repo,
+                        "kind": kind,
+                        "number": number,
+                        "link": link,
+                        "text": self.clean(text.strip()),
+                        "workspace_root": str(workspace_directory()),
+                        "configuration_file": str(env_path()),
+                        "model": model,
+                    }
+                )
                 now = time.time()
                 db.execute(
                     "INSERT INTO pending_submissions VALUES (?,?,?,?,?,?,?)",
@@ -212,6 +227,14 @@ class ConversationService:
             "task_id": request_id,
             "sequence": now,
         }
+        selected_model = json.loads(payload).get("model")
+        if selected_model:
+            options = await self.model_catalog()
+            if selected_model not in {item["id"] for item in options["models"]}:
+                raise ConfigError(
+                    "Selected model is not in the current SDK catalog. Refresh models "
+                    "and start a new task. No fallback was used."
+                )
         # Archive before accepting. A failed write leaves the same request safe to retry.
         if archive_user:
             await self.archive.save(message)
@@ -254,6 +277,7 @@ class ConversationService:
             "result": row["result"],
             "title": json.loads(row["payload"]).get("text", "")[:120],
             "user_text": json.loads(row["payload"]).get("text", ""),
+            "model": json.loads(row["payload"]).get("model"),
             "changed_at": row["changed"],
             "link": json.loads(row["payload"]).get("link", ""),
             "created_at": row["created"],
@@ -291,7 +315,8 @@ class ConversationService:
         with self.db() as db:
             rows = db.execute(
                 "SELECT * FROM requests WHERE (source='desktop' AND actor=?) "
-                "OR source='telegram' ORDER BY created DESC", (actor,)
+                "OR source='telegram' ORDER BY created DESC",
+                (actor,),
             ).fetchall()
         authorized = []
         for row in rows:
@@ -365,8 +390,10 @@ class ConversationService:
             previous = sessions.get(tid)
             if previous is None:
                 sessions[tid] = {
-                    "id": tid, "title": message.get("content", "")[:120],
-                    "mode": message["mode"], "source": message["source"],
+                    "id": tid,
+                    "title": message.get("content", "")[:120],
+                    "mode": message["mode"],
+                    "source": message["source"],
                     "created_at": message["sequence"],
                 }
             else:
@@ -399,8 +426,12 @@ class ConversationService:
             else "0"
         )
         return {
-            "messages": page, "cursor": next_cursor, "reset": cursor == "0",
-            "cached": cached, "warning": warning, "session": session,
+            "messages": page,
+            "cursor": next_cursor,
+            "reset": cursor == "0",
+            "cached": cached,
+            "warning": warning,
+            "session": session,
             "sessions": sorted(sessions.values(), key=lambda s: s["created_at"], reverse=True),
         }
 
@@ -526,11 +557,15 @@ class ConversationService:
 
     @staticmethod
     def cancelled_result():
-        return json.dumps({
-            "outcome": "cancelled", "summary": "Task stopped. Existing work and history retained. "
-            "Review repository changes before starting again.",
-            "pr_url": "", "validation": "Stopped by user; unfinished steps were not run.",
-        })
+        return json.dumps(
+            {
+                "outcome": "cancelled",
+                "summary": "Task stopped. Existing work and history retained. "
+                "Review repository changes before starting again.",
+                "pr_url": "",
+                "validation": "Stopped by user; unfinished steps were not run.",
+            }
+        )
 
     async def execute_cancellable(self, row):
         """Keep the execution lock until SDK cleanup and cancellation archival finish."""
@@ -604,7 +639,11 @@ class ConversationService:
         try:
             result = json.loads(row["result"])
             if not isinstance(result, dict) or result.get("outcome") not in {
-                "completed", "needs_clarification", "failed", "delivered_unverified", "cancelled"
+                "completed",
+                "needs_clarification",
+                "failed",
+                "delivered_unverified",
+                "cancelled",
             }:
                 raise ValueError
         except (ValueError, TypeError):
@@ -770,7 +809,13 @@ class ConversationService:
                 raise ConfigError(
                     "PRBOT_TASK_TIMEOUT must be a positive number of seconds."
                 ) from None
-            result = await adapter.invoke(path, prompt, RESULT_SCHEMA, timeout)
+            result = await adapter.invoke(
+                path,
+                prompt,
+                RESULT_SCHEMA,
+                timeout,
+                **({"model": payload["model"]} if payload.get("model") else {}),
+            )
             if (
                 not self.adapter
                 and payload["kind"] != "chat"
