@@ -13,10 +13,14 @@ export function TaskResult({ content, send, busy, taskId }: { content: string; s
   } catch { /* Older plain-text messages remain readable. */ }
   if (result?.delivery && (typeof result.delivery !== 'object' || Array.isArray(result.delivery))) result = { ...result, delivery: undefined };
   if (!result || typeof result.summary !== 'string') return <MessageText content={content} />;
+  const delivery = checked?.delivery || result.delivery;
+  const deliveryFailed = delivery?.ci === 'failed' || delivery?.pr === 'invalid';
   const url = typeof result.pr_url === 'string' && /^https:\/\/github\.com\/[\w-]+\/[\w.-]+\/pull\/[1-9]\d*\/?$/.test(result.pr_url) ? result.pr_url : '';
   return <div className="space-y-3 text-sm leading-7"><MessageText content={result.summary} />
     {!result.delivery && typeof result.validation === 'string' && result.validation && <p className="whitespace-pre-wrap text-xs text-muted">{result.validation}</p>}
-    {result.delivery && (result.delivery.ci === 'failed' || result.delivery.pr === 'invalid') && <p role="alert" className="text-xs text-red-700">Delivery needs attention. Open the pull request or review delivery details.</p>}
+    {deliveryFailed && <p role="alert" className="delivery-warning text-xs text-red-700">{checked?.delivery
+      ? 'Delivery needs attention. Open the pull request or review delivery details.'
+      : 'A saved delivery snapshot reported a failure. Verify delivery for the current status.'}</p>}
     {result.delivery && <details className="text-xs text-muted"><summary>Saved delivery details</summary><p>Snapshot from this response; use Verify delivery for a current check.</p><dl aria-label="Delivery facts">
       <div><dt className="inline">Code: </dt><dd className="inline">{result.delivery.code === 'completed_by_codex' ? 'Completed (reported by Codex)' : 'Not confirmed by Codex'}</dd></div>
       <div><dt className="inline">Pull request: </dt><dd className="inline">{typeof result.delivery.pr === 'string' ? result.delivery.pr : 'unknown'}</dd></div>

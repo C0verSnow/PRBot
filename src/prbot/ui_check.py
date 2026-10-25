@@ -890,13 +890,14 @@ true;
   const completedTask = {...fixtureTask,status:'delivered_unverified',events:[],changed_at:200,
     result:JSON.stringify({summary:'The requested work is done.',outcome:'delivered_unverified',
       pr_url:'https://github.com/owner/repo/pull/25',validation:'Old pending check snapshot',
-      delivery:{code:'completed_by_codex',pr:'open',issue:'closed',ci:'pending'}})};
+      delivery:{code:'completed_by_codex',pr:'open',issue:'closed',ci:'failed'}})};
   const verificationCount = routed.filter(body => body.action === 'verify_delivery').length;
   window.receiveNative({ok:true,tasks:[completedTask],tasks_revision:999999999}); await tick();
   assert(!document.body.innerText.includes('verification incomplete'),
     'Completion is still downgraded by automatic verification');
   assert(routed.filter(body => body.action === 'verify_delivery').length === verificationCount,
     'Delivery verification was automatic');
+  assert(document.querySelector('.delivery-warning'), 'Known delivery failure was hidden');
   const verify = () => document.querySelector('.verify-delivery');
   assert(verify() && !verify().disabled, 'Optional verification entry is missing');
   verify().click(); await tick();
@@ -919,6 +920,8 @@ true;
   await tick();
   assert(document.querySelector('.verification-result').textContent.includes('passed'),
     'Verification success did not update');
+  assert(!document.querySelector('.delivery-warning'),
+    'Old failed snapshot contradicted the latest successful verification');
   assert(document.querySelector('.task-status').dataset.state === 'delivered_unverified',
     'Optional verification rewrote conversation completion');
   // A send failure must also end the model loading state and offer retry.
