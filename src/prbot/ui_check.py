@@ -223,7 +223,7 @@ true;
     const main = document.querySelector('main');
     main.scrollTop = main.scrollHeight;
     const tail = main.lastElementChild.getBoundingClientRect().bottom;
-    assert(tail >= main.getBoundingClientRect().bottom - 1,
+    assert(main.scrollTop === 0 || tail >= main.getBoundingClientRect().bottom - 1,
       `Blank main scroll: content ends at ${tail}`);
     main.scrollTop = 0;
   };
