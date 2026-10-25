@@ -323,6 +323,16 @@ true;
     'Identical successful refresh has no success feedback');
 
   chooseModel('fixture-model'); await tick();
+  field('refresh-models').click(); await tick();
+  complete('models',{model_catalog:{models:[{id:'another-model',name:'Another',default:false}]}});
+  await tick();
+  assert(field('model').value === 'fixture-model'
+    && field('model').selectedOptions[0].textContent.includes('unavailable'),
+    'Removed model silently changed to default');
+  field('refresh-models').click(); await tick();
+  complete('models',{model_catalog:{models:[{id:'fixture-model',name:'Fixture',default:true}]}});
+  await tick();
+
   // Drain a pre-existing history request, then queued correlated requests.
   complete('history'); await tick(); complete('history'); await tick();
   for (const link of ['https://github.com/owner/repo',
@@ -771,9 +781,9 @@ true;
   assert([...feed.querySelectorAll('[data-role="system"]')]
     .some(card => card.textContent.includes('Waiting for an answer.')),
     'Runtime status was mislabeled as Codex');
+  field('draft').focus();
   conversationScroll.scrollTop = 0;
   conversationScroll.dispatchEvent(new Event('scroll')); await tick();
-  field('draft').focus();
   const draftValue = field('draft').value;
   fixtureTask.events.push({sequence:37,kind:'text',created:38,text:'Ready for your answer.'});
   window.receiveNative({ok:true,tasks:[JSON.parse(JSON.stringify(fixtureTask))],
@@ -905,6 +915,22 @@ true;
     && field('model-help').textContent.includes('could not be sent'),
     'Bridge failure left model refresh spinning');
   handler.postMessage = body => routed.push(body);
+  field('refresh-models').click(); await tick();
+  const timedOutModel = routed.filter(body => body.action === 'models').at(-1);
+  const originalNow = Date.now;
+  Date.now = () => originalNow() + 61000;
+  await waitFor(() => !field('refresh-models').disabled);
+  Date.now = originalNow;
+  assert(field('model-help').textContent.includes('timed out'), 'Model timeout is silent');
+  // A late timed-out success must not overwrite the visible retry state.
+  window.receiveNative({ok:true,completed_action:'models',bridge_id:timedOutModel.bridge_id,
+    model_catalog:{models:[{id:'stale-model',name:'Stale',default:true}]}}); await tick();
+  assert(field('model-help').textContent.includes('timed out'), 'Stale model response won');
+  field('refresh-models').click(); await tick();
+  const modelRetry = routed.filter(body => body.action === 'models').at(-1);
+  window.receiveNative({ok:true,completed_action:'models',bridge_id:modelRetry.bridge_id,
+    model_catalog:{models:[{id:'fixture-model',name:'Fixture',default:true}]}}); await tick();
+  assert(field('model-help').textContent.includes('Loaded 1'), 'Timeout retry did not recover');
   assert(!/[\u4e00-\u9fff]/.test(document.body.innerText), 'Non-English product copy');
   window.__uiCheckResult = 'ok';
 })().catch(error => { window.__uiCheckResult = 'failed:' + error.message; });

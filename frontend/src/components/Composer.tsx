@@ -8,8 +8,9 @@ export function validLink(link: string, mode: Workspace) {
 export function Composer({ draft, mode, task, onChange, busy, submitting, onSend, onStop, onNew, onCancel, stopPending, catalog, onRefreshModels, modelsLoading }: Props) {
   const stopping = task?.status === 'cancelling';
   const active = !!task && ['queued', 'running', 'cancelling'].includes(task.status);
-  const unknownModel = !!draft.model && !!catalog && !catalog.models.some(model => model.id === draft.model);
-  const reason = unknownModel ? 'Selected model is no longer listed. Refresh models or choose another model.' : !validLink(draft.link, mode) ? 'Enter a GitHub repository, issue or pull request link.'
+  const missingModel = !!draft.model && !catalog?.models.some(model => model.id === draft.model);
+  const unknownModel = missingModel && !!catalog && !modelsLoading;
+  const reason = draft.model && (modelsLoading || !catalog) ? 'Wait for the model list or retry Refresh models before sending this model.' : unknownModel ? 'Selected model is no longer listed. Refresh models or choose another model.' : !validLink(draft.link, mode) ? 'Enter a GitHub repository, issue or pull request link.'
     : !draft.text.trim() ? 'Describe the required change.'
     : draft.text.length > 12000 ? 'Use up to 12000 characters.' : '';
   const label = stopping ? 'Stopping…' : active ? 'Stop task' : submitting ? 'Submitting…' : 'Send';
@@ -22,7 +23,7 @@ export function Composer({ draft, mode, task, onChange, busy, submitting, onSend
       <label htmlFor="model">Model</label>
       <select id="model" value={draft.model || ''} disabled={active || submitting || modelsLoading} onChange={event => onChange({ ...draft, model: event.target.value || undefined, request_id: crypto.randomUUID() })} aria-describedby="model-help">
         <option value="">Codex default</option>
-        {unknownModel && <option value={draft.model} disabled>{draft.model} · unavailable</option>}
+        {missingModel && <option value={draft.model} disabled>{draft.model} · {unknownModel ? 'unavailable' : 'checking availability'}</option>}
         {catalog?.models.map(model => <option key={model.id} value={model.id}>{model.name}</option>)}
       </select>
       <button id="refresh-models" type="button" className="secondary" disabled={modelsLoading} aria-busy={modelsLoading} onClick={onRefreshModels}>{modelsLoading ? 'Refreshing models…' : catalog?.error ? 'Retry loading models' : 'Refresh models'}</button>
