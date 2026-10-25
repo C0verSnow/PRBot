@@ -202,118 +202,180 @@ true;
     'Sidebar width is not 252px');
   assert(getComputedStyle(document.querySelector('#composer')).borderRadius === '17px',
     'Composer border radius missing');
-  assert(document.querySelectorAll('[data-view]').length === 3);
-  assert(document.getElementById('send').disabled, 'Invalid empty submission is enabled');
-  const input = document.getElementById('draft');
+  assert(document.querySelectorAll('[data-view]').length === 2, 'GitHub navigation not unified');
+  const field = id => document.getElementById(id);
   const edit = (element, value) => {
     const prototype = element.tagName === 'TEXTAREA'
       ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
     Object.getOwnPropertyDescriptor(prototype, 'value').set.call(element, value);
     element.dispatchEvent(new Event('input', {bubbles:true}));
   };
-  edit(document.getElementById('target-link'), 'https://github.com/owner/repo');
-  edit(input, 'Create documentation and explain acceptance criteria');
-  await tick();
-  assert(!document.getElementById('send').disabled);
-  document.querySelector('[data-view="Pull Request"]').click();
-  await tick();
-  assert(document.getElementById('draft').value === '', 'Mode drafts are mixed');
-  assert(document.getElementById('send').disabled);
-  document.querySelector('[data-view="Issue"]').click();
-  await tick();
-  assert(document.getElementById('draft').value.includes('documentation'));
-  // Hold bridge responses to reproduce polling, double-click and heartbeat races.
-  const field = id => document.getElementById(id);
   const waitFor = async predicate => {
     for (let count = 0; count < 300; count++) { if (predicate()) return; await tick(); }
     throw new Error('Native response timed out');
   };
-  await waitFor(() => !field('send').disabled);
+  assert(field('send').disabled, 'Empty submission enabled');
   const handler = window.webkit.messageHandlers.prbot;
   const originalPost = handler.postMessage;
   const requests = [];
-  handler.postMessage = body => { requests.push(body); };
-  const complete = action => window.receiveNative({ok:true, busy:false, completed_action:action});
-  try {
-    for (let length = 1; length <= 7; length++) {
-      edit(field('draft'), 'x'.repeat(length)); await tick();
-      assert(!field('send').disabled, 'Short description rejected');
-    }
-    edit(field('draft'), '   '); await tick();
-    assert(field('send').disabled, 'Whitespace description accepted');
-    edit(field('draft'), 'fix'); await tick();
-    const labels = [];
-    const observer = new MutationObserver(() => labels.push(field('send').textContent));
-    observer.observe(field('send'), {subtree:true, childList:true, characterData:true});
-    await waitFor(() => requests.some(request => request.action === 'tasks'));
-    assert(field('send').textContent === 'Send', 'Polling changed Send label');
-    complete('tasks'); await tick();
-    assert(!labels.includes('Submitting…'), 'Polling flickered submission label');
-    observer.disconnect();
-    field('composer').requestSubmit(); field('composer').requestSubmit(); await tick();
-    assert(requests.filter(request => request.action === 'submit_message').length === 1,
-      'Double click submitted twice');
-    assert(field('send').textContent === 'Submitting…', 'Missing submit progress');
-    window.receiveNative({ok:true, busy:false, status:{state:'stopped'}}); await tick();
-    assert(field('send').textContent === 'Submitting…', 'Heartbeat released submit lock');
-    complete('tasks'); await tick();
-    assert(field('send').textContent === 'Submitting…', 'Other response released submit lock');
-    window.receiveNative({ok:false, busy:false, completed_action:'submit_message',
-      message:'Message not saved. Retry.'}); await tick();
-    assert(field('send').textContent === 'Send' && !field('send').disabled);
-    assert(field('draft').value === 'fix', 'Failed submit lost draft');
-    field('composer').requestSubmit(); await tick();
-    const submitted = requests.filter(request => request.action === 'submit_message');
-    assert(submitted.length === 2 && submitted[0].request_id === submitted[1].request_id,
-      'Retry lost idempotency key');
-    const report = JSON.stringify({summary:'Implemented', outcome:'delivered_unverified',
-      pr_url:'https://github.com/owner/repo/pull/1', validation:'Required remote checks failed.',
-      delivery:{code:'completed_by_codex',pr:'open',issue:'closed',ci:'failed'}});
-    const task = {id:submitted[1].request_id,mode:'Issue',status:'delivered_unverified',
-      conversation_id:'ui',created_at:1,result:report};
-    edit(field('draft'), 'new text typed while submitting'); await tick();
-    window.receiveNative({ok:true,busy:false,completed_action:'submit_message',accepted:task,tasks:[task]});
+  handler.postMessage = body => requests.push(body);
+  const complete = (action, data = {}) => {
+    const request = requests.filter(item => item.action === action).at(-1);
+    window.receiveNative({ok:true,completed_action:action,
+      ...(request ? {bridge_id:request.bridge_id} : {}),...data});
+  };
+  // Drain a pre-existing history request, then queued correlated requests.
+  complete('history'); await tick(); complete('history'); await tick();
+  for (const link of ['https://github.com/owner/repo',
+    'https://github.com/owner/repo/issues/19', 'https://github.com/owner/repo/pull/20']) {
+    edit(field('target-link'),link); edit(field('draft'),'fix'); await tick();
+    assert(!field('send').disabled, 'Unified target rejected: ' + link);
+  }
+  edit(field('target-link'),'https://github.com/owner/repo/actions'); await tick();
+  assert(field('send').disabled, 'Unsupported link enabled');
+  edit(field('target-link'),'https://github.com/owner/repo/pull/20'); await tick();
+  field('composer').requestSubmit(); field('composer').requestSubmit(); await tick();
+  const sent = requests.filter(request => request.action === 'submit_message');
+  assert(sent.length === 1 && sent[0].mode === 'GitHub', 'Duplicate or wrong routing');
+  assert(field('send').getAttribute('aria-label') === 'Submitting…');
+  assert(document.querySelector('[data-state="submitting"]'), 'Submitting state missing');
+  assert(document.querySelector('[aria-label="Conversation history"]').textContent.includes('fix'),
+    'Submitted message not immediately shown');
+  window.receiveNative({ok:true,status:{state:'stopped'}}); await tick();
+  assert(field('send').getAttribute('aria-label') === 'Submitting…', 'Heartbeat released lock');
+  complete('submit_message',{ok:false,message:'Message not saved. Retry.'}); await tick();
+  assert(field('draft').value === 'fix' && !field('send').disabled, 'Failure lost draft');
+  field('composer').requestSubmit(); await tick();
+  const retry = requests.filter(request => request.action === 'submit_message').at(-1);
+  assert(retry.request_id === sent[0].request_id, 'Retry changed task ID');
+  // New during submission must not stop the task or let a late acceptance steal selection.
+  field('new-session').click(); await tick();
+  assert(field('draft').value === '' && field('target-link').value === '');
+  const first = {id:retry.request_id,mode:'Pull Request',source:'desktop',status:'queued',
+    conversation_id:retry.request_id,created_at:1,changed_at:1,
+    user_text:'fix',title:'fix',events:[]};
+  complete('submit_message',{accepted:{...first},tasks:[{...first}]});
+  await tick();
+  assert(!document.querySelector('[data-state="queued"]'), 'Late acceptance changed session');
+  assert(document.querySelector('.activity-count').textContent === '1', 'Missing actual activity');
+  field('history-toggle').click(); await tick();
+  assert(field('history-sessions').hidden, 'History did not collapse');
+  field('history-toggle').click(); await tick();
+  document.querySelector(`[data-session="${first.id}"]`).click(); await tick();
+  assert(!document.querySelector('.activity-count'),
+    'Viewing session did not acknowledge activity');
+  assert(field('send').getAttribute('aria-label') === 'Stop task' && !field('send').disabled);
+  field('send').click(); field('send').click(); await tick();
+  assert(requests.filter(item => item.action === 'cancel_task').length === 1, 'Duplicate stop');
+  assert(requests.find(item => item.action === 'cancel_task').task_id === first.id,
+    'Wrong stop ID');
+  first.status = 'cancelling'; first.changed_at = 2;
+  complete('cancel_task',{task_update:{...first}}); await tick();
+  assert(field('send').getAttribute('aria-label') === 'Stopping…' && field('send').disabled,
+    'Stop acknowledgement presented as terminal');
+  first.status = 'cancelled'; first.changed_at = 3;
+  window.receiveNative({ok:true,tasks:[{...first}]}); await tick();
+  assert(field('send').getAttribute('aria-label') === 'Send',
+    'Terminal state did not restore send');
+  field('new-session').click(); await tick();
+  edit(field('target-link'),'https://github.com/owner/repo'); edit(field('draft'),'keep me');
+  await tick(); field('cancel-draft').click(); await tick();
+  assert(document.querySelector('[role="alertdialog"]'), 'Draft loss has no confirmation');
+  [...document.querySelectorAll('button')]
+    .find(button => button.textContent === 'Keep editing').click();
+  await tick(); assert(field('draft').value === 'keep me');
+  field('cancel-draft').click(); await tick(); field('confirm-cancel').click(); await tick();
+  assert(field('draft').value === '' && field('target-link').value === '', 'Cancel did not clear');
+  assert(document.querySelector(`[data-session="${first.id}"]`), 'Cancel deleted history');
+  // Restore an archived-only session and verify pagination and stale-response guards.
+  const savedSessions = [{id:'remote-task',title:'Restored archived context',mode:'Issue',
+    source:'desktop',created_at:2}, {id:first.id,title:'fix',mode:'Pull Request',
+    source:'desktop',created_at:1}];
+  const latestHistory = () => requests.filter(item => item.action === 'history').at(-1);
+  const respondHistory = (request, data = {}) => window.receiveNative({ok:true,
+    completed_action:'history',bridge_id:request.bridge_id,
+    history:{mode:'All',session:request.session,request_id:request.request_id,
+      cursor:'0',reset:true,sessions:savedSessions,messages:[],...data}});
+  for (let i = 0; i < 5; i++) {
+    const request = latestHistory();
+    if (request) respondHistory(request);
     await tick();
-    await waitFor(() => field('target-link').value === '');
-    assert(field('draft').value === 'new text typed while submitting',
-      'Accepted submission erased new input');
-    edit(field('target-link'), 'https://github.com/owner/repo'); await tick();
-    field('composer').requestSubmit(); await tick();
-    const nextSubmit = requests.filter(request => request.action === 'submit_message').at(-1);
-    assert(nextSubmit.request_id !== task.id,
-      'New draft reused accepted request ID: ' + JSON.stringify({
-        count:requests.filter(request => request.action === 'submit_message').length,
-        disabled:field('send').disabled, help:field('input-help').textContent}));
-    const nextTask = {...task, id:nextSubmit.request_id};
-    window.receiveNative({ok:true,completed_action:'submit_message',bridge_id:nextSubmit.bridge_id,
-      accepted:nextTask,tasks:[nextTask]});
-    await waitFor(() => field('draft').value === '');
-    assert(field('draft').value === '', 'Unchanged accepted draft did not clear');
-    window.receiveNative({ok:false,message:'temporary failure'}); await tick();
-    window.receiveNative({ok:true,message:null,completed_action:'tasks'}); await tick();
-    assert(!field('feedback').textContent, 'Successful polling retained old error');
-    edit(field('target-link'), 'https://github.com/owner/repo');
-    edit(field('draft'), 'timeout draft'); await tick();
-    field('composer').requestSubmit(); await tick();
-    const expired = requests.filter(request => request.action === 'submit_message').at(-1);
-    const originalNow = Date.now;
-    const advancedNow = originalNow() + 61000;
-    try {
-      Date.now = () => advancedNow;
-      await new Promise(resolve => setTimeout(resolve, 3200));
-      assert(field('send').textContent === 'Send', 'Timed out request held busy lock');
-      assert(field('draft').value === 'timeout draft', 'Timeout lost draft');
-    } finally { Date.now = originalNow; }
-    window.receiveNative({ok:true,completed_action:'submit_message',bridge_id:expired.bridge_id,
-      accepted:{...task,id:expired.request_id},tasks:[]}); await tick();
-    assert(field('draft').value === 'timeout draft', 'Late timed-out response cleared draft');
-    assert(document.querySelector('[aria-label="Task status"]').textContent.includes(
-      'Delivered · verification incomplete'), 'Delivery is hidden by generic failure');
-    const facts = document.querySelector('[aria-label="Delivery facts"]').textContent;
-    assert(facts.includes('open') && facts.includes('closed') && facts.includes('failed'),
-      'Separate delivery facts missing');
-    complete('history'); await tick();
-  } finally { handler.postMessage = originalPost; }
+    if (latestHistory() === request) break;
+  }
+  document.querySelector('[data-session="remote-task"]').click(); await tick();
+  const oldRequest = latestHistory();
+  respondHistory(oldRequest,{cursor:'next-page',messages:[{
+    conversation_id:'legacy',message_id:'old-user',task_id:'remote-task',role:'user',
+    source:'desktop',sequence:1,content:'Restored first line\\nSecond line'}]});
+  await tick();
+  const history = document.querySelector('[aria-label="Conversation history"]');
+  assert(history.textContent.includes('Restored first line'), 'Archived messages not restored');
+  assert(history.querySelectorAll('.history-message').length === 1, 'Duplicate saved message');
+  [...history.querySelectorAll('button')]
+    .find(button => button.textContent === 'Load more messages').click(); await tick();
+  assert(latestHistory().cursor === 'next-page', 'History pagination cursor lost');
+  respondHistory(latestHistory(),{reset:false,messages:[{
+    conversation_id:'legacy',message_id:'older',task_id:'remote-task',role:'user',
+    source:'desktop',sequence:2,content:'More archived context'}]}); await tick();
+  assert(history.querySelectorAll('.history-message').length === 2, 'History page not appended');
+  // Sending from an archived session must use a fresh task UUID, never the remote ID.
+  edit(field('target-link'),'https://github.com/owner/repo');
+  edit(field('draft'),'New task from saved context'); await tick();
+  field('composer').requestSubmit(); await tick();
+  const historicalSend = requests.filter(item => item.action === 'submit_message').at(-1);
+  assert(historicalSend.request_id !== 'remote-task', 'Archived task ID reused for new work');
+  complete('submit_message',{ok:false,message:'Fixture: not submitted'}); await tick();
+  document.querySelector('[data-session="remote-task"]').click(); await tick();
+  assert(field('draft').value === '', 'Sending copied the same draft into two sessions');
+  field('new-session').click(); await tick();
+  respondHistory(oldRequest,{messages:[{message_id:'stale',content:'Must not appear'}]});
+  await tick();
+  assert(!history.textContent.includes('Must not appear'), 'Stale history response won race');
+  // Finish any queued request, then exercise error, retry and empty feedback.
+  for (let i = 0; i < 5; i++) {
+    const request = latestHistory(); if (request) respondHistory(request);
+    await tick(); if (latestHistory() === request) break;
+  }
+  [...document.querySelectorAll('aside button')]
+    .find(button => button.textContent === 'Refresh history').click(); await tick();
+  const failedHistory = latestHistory();
+  window.receiveNative({ok:false,completed_action:'history',bridge_id:failedHistory.bridge_id,
+    history_error:{request_id:failedHistory.request_id,message:'Fixture history unavailable'}});
+  await tick(); assert(history.querySelector('[role="alert"]'), 'Missing history error');
+  [...history.querySelectorAll('button')]
+    .find(button => button.textContent === 'Retry loading').click(); await tick();
+  respondHistory(latestHistory(),{sessions:[],messages:[]}); await tick();
+  assert(history.textContent.includes('No saved messages'), 'Missing empty history guidance');
+  // A lost acceptance reply must be recovered from task polling, without reusing
+  // the accepted task's key for new input or clearing edits made after timeout.
+  field('new-session').click(); await tick();
+  edit(field('target-link'),'https://github.com/owner/repo');
+  edit(field('draft'),'Submission with lost reply'); await tick();
+  field('composer').requestSubmit(); await tick();
+  const lost = requests.filter(item => item.action === 'submit_message').at(-1);
+  const realNow = Date.now;
+  try {
+    Date.now = () => realNow() + 120000;
+    await waitFor(() => field('send').getAttribute('aria-label') === 'Send');
+  } finally { Date.now = realNow; }
+  edit(field('draft'),'New input after timeout'); await tick();
+  const recovered = {id:lost.request_id,mode:'Issue',source:'desktop',status:'completed',
+    conversation_id:lost.request_id,created_at:4,changed_at:5,
+    user_text:'Submission with lost reply',title:'Recovered task',events:[]};
+  window.receiveNative({ok:true,tasks:[recovered]}); await tick();
+  assert(field('draft').value === 'New input after timeout', 'Polling lost unsent edits');
+  window.receiveNative({ok:true,completed_action:'submit_message',bridge_id:lost.bridge_id,
+    accepted:recovered}); await tick();
+  assert(field('draft').value === 'New input after timeout', 'Late acceptance cleared edits');
+  field('composer').requestSubmit(); await tick();
+  const recoveredSend = requests.filter(item => item.action === 'submit_message').at(-1);
+  assert(recoveredSend.request_id !== lost.request_id, 'Recovered submission reused old key');
+  const acceptedRecovery = {...recovered,id:recoveredSend.request_id,
+    conversation_id:recoveredSend.request_id,user_text:'New input after timeout'};
+  window.receiveNative({ok:true,tasks:[recovered,acceptedRecovery]}); await tick();
+  complete('submit_message',{accepted:acceptedRecovery,tasks:[recovered,acceptedRecovery]});
+  await tick(); assert(field('draft').value === '', 'Known submitted input not cleared');
+  handler.postMessage = originalPost;
   edit(field('draft'), 'Create documentation and explain acceptance criteria'); await tick();
   document.getElementById('user').click();
   await tick();
@@ -355,7 +417,8 @@ true;
   await select('Workspace');
   assert(performance.now() - switchStart < 500, 'Settings navigation blocked by connections');
   const pendingConnection = window.__slowConnection;
-  window.receiveNative({ok:true,completed_action:'connections',bridge_id:pendingConnection.bridge_id,
+  window.receiveNative({ok:true,completed_action:'connections',
+    bridge_id:pendingConnection.bridge_id,
     connections:{id_token:'refreshed-token',infisical:'Connected',project:'fixture'}});
   await tick(); await select('Connections');
   assert(field('id-token').value === 'unsaved-connection-draft',
@@ -518,86 +581,16 @@ true;
     & Node.DOCUMENT_POSITION_FOLLOWING, 'Execution feedback is below composer');
   assert(document.querySelector('.task-status').nextElementSibling === field('composer'),
     'Codex status must sit immediately above the composer');
-  assert(!document.querySelector('[aria-label="Conversation history"]'),
-    'History leaked into Issue workspace');
+  // History remains in the sidebar while the task workspace stays mounted.
   const historyRequests = [];
   handler.postMessage = body => historyRequests.push(body);
+  field('history-toggle').click(); await tick();
+  field('history-toggle').click(); await tick();
+  assert(!field('history-sessions').hidden && field('composer'), 'History replaced workspace');
   document.querySelector('[data-view="Chat History"]').click(); await tick();
-  const history = document.querySelector('[aria-label="Conversation history"]');
-  assert(history, 'Missing independent Chat History');
-  assert(!field('composer'), 'History opens with an unrelated question box');
-  assert(history.textContent.includes('Loading conversations'), 'Missing loading state');
-  const latestHistory = () => historyRequests
-    .filter(request => request.action === 'history').at(-1);
-  assert(latestHistory().mode === 'All', 'History does not default to all conversations');
-  const savedSessions = [{id:'remote-task',title:'Choose new PR5',mode:'Issue',
-    source:'telegram',created_at:2}, {id:'other-task',title:'Review pull request',
-    mode:'Pull Request',source:'desktop',created_at:1}];
-  const respondHistory = (data, request = latestHistory()) => window.receiveNative({ok:true,
-    completed_action:'history',bridge_id:request.bridge_id,
-    history:{mode:request.mode,session:request.session,request_id:request.request_id,
-      cursor:'0',reset:true,sessions:savedSessions,messages:[],...data}});
-  respondHistory({messages:[
-    {conversation_id:'remote',message_id:'one',task_id:'remote-task',source:'telegram',mode:'Issue',
-      role:'user',content:'Choose new PR5\\nKeep the existing branch',sequence:1},
-    {conversation_id:'remote',message_id:'two',task_id:'remote-task',source:'telegram',mode:'Issue',
-      role:'assistant',content:JSON.stringify({summary:'Continuing original task',
-        validation:'',pr_url:''}),sequence:2}
-  ]}); await tick();
-  assert(history.textContent.includes('Telegram') && history.textContent.includes('Choose new PR5'),
-    'Telegram history missing');
-  assert(history.querySelectorAll('.history-message').length === 2, 'Missing message cards');
-  assert(history.querySelector('.history-message .whitespace-pre-wrap').textContent.includes('\\n'),
-    'Multiline message content lost');
-  assert(history.textContent.includes('Continuing original task')
-    && !history.textContent.includes('"summary"'), 'Serialized result leaked into history');
-  const sessionButton = [...history.querySelectorAll('.history-session')]
-    .find(button => button.textContent.includes('Choose new PR5'));
-  sessionButton.click(); await tick();
-  assert(latestHistory().session === 'remote-task', 'Session not filtered by backend');
-  respondHistory({messages:[],cursor:'next-page'}); await tick();
-  [...history.querySelectorAll('button')]
-    .find(button => button.textContent === 'Load more messages').click();
-  await tick();
-  assert(latestHistory().cursor === 'next-page', 'History cursor not sent');
-  respondHistory({reset:false,messages:[{conversation_id:'remote',message_id:'three',
-    task_id:'remote-task',role:'user',content:'Older saved detail',sequence:3}]}); await tick();
-  assert(history.textContent.includes('Older saved detail'), 'Pagination lost messages');
-  const staleRequest = latestHistory();
-  const modeSelect = document.querySelector('[aria-label="History mode"]');
-  modeSelect.value = 'Pull Request'; modeSelect.dispatchEvent(new Event('change',{bubbles:true}));
-  await tick();
-  assert(latestHistory().mode === 'Pull Request' && latestHistory().session === '',
-    'Switching history mode kept an invisible session filter');
-  respondHistory({messages:[{message_id:'stale',content:'Must not appear',sequence:1}]},
-    staleRequest);
-  await tick(); assert(!history.textContent.includes('Must not appear'), 'Stale history won race');
-  const failedRequest = latestHistory();
-  window.receiveNative({ok:false,completed_action:'history',bridge_id:failedRequest.bridge_id,
-    history_error:{request_id:failedRequest.request_id,
-      message:'History unavailable. Retry loading messages.'}});
-  await tick(); assert(history.querySelector('[role="alert"]'), 'Missing history failure state');
-  [...history.querySelectorAll('button')]
-    .find(button => button.textContent === 'Retry loading').click();
-  await tick(); respondHistory({messages:[],cursor:'lost-anchor'}); await tick();
-  [...history.querySelectorAll('button')]
-    .find(button => button.textContent === 'Load more messages').click(); await tick();
-  const changedRequest = latestHistory();
-  window.receiveNative({ok:false,completed_action:'history',bridge_id:changedRequest.bridge_id,
-    history_error:{request_id:changedRequest.request_id,
-      message:'History changed. Refresh history.'}});
-  await tick();
-  [...history.querySelectorAll('button')]
-    .find(button => button.textContent === 'Retry loading').click(); await tick();
-  assert(latestHistory().cursor === '0', 'Retry reused missing history anchor');
-  respondHistory({sessions:[],messages:[]}); await tick();
-  assert(history.textContent.includes('No saved messages'), 'Missing empty history guidance');
-  [...history.querySelectorAll('button')]
-    .find(button => button.textContent === 'New private chat').click();
-  await tick();
-  assert(field('composer') && !field('target-link'), 'Private chat entry unavailable');
+  assert(field('composer') && !field('target-link'), 'Private chat entry missing');
+  document.querySelector('[data-view="GitHub"]').click(); await tick();
   handler.postMessage = originalPost;
-  document.querySelector('[data-view="Issue"]').click(); await tick();
   field('user').focus();
   // Keep a deterministic fixture visible for scroll, answer-routing and screenshot evidence.
   const routed = [];
@@ -610,6 +603,7 @@ true;
       text:'Reviewed repository context · step ' + index}))};
   window.receiveNative({ok:true,tasks:[JSON.parse(JSON.stringify(fixtureTask))],
     tasks_revision:999999999}); await tick();
+  document.querySelector('[data-session="ui-waiting-task"]').click(); await tick();
   assert(document.querySelector('.task-status').dataset.state === 'needs_clarification',
     'Task animation is not driven by task state');
   const feed = document.querySelector('.execution-feed');
@@ -629,6 +623,10 @@ true;
   assert(feed.scrollHeight - feed.scrollTop - feed.clientHeight < 2,
     'Feedback did not follow near the bottom');
   edit(field('answer-ui-waiting-task'), 'Use feature/ui'); await tick();
+  field('new-session').click(); await tick();
+  document.querySelector('[data-session="ui-waiting-task"]').click(); await tick();
+  assert(field('answer-ui-waiting-task').value === 'Use feature/ui',
+    'Session navigation lost the unsent answer');
   const answerForm = field('answer-ui-waiting-task').closest('form');
   answerForm.requestSubmit(); await tick();
   const reply = routed.find(body => body.action === 'answer');
@@ -637,17 +635,38 @@ true;
   window.receiveNative({ok:false,completed_action:'answer',bridge_id:reply.bridge_id,
     message:'Fixture: waiting for your answer'}); await tick();
   assert(field('answer-ui-waiting-task').value === 'Use feature/ui', 'Failed reply lost draft');
+  field('new-session').click(); await tick();
+  document.querySelector('[data-session="ui-waiting-task"]').click(); await tick();
+  assert(field('answer-ui-waiting-task').value === 'Use feature/ui',
+    'Session navigation lost a retryable answer');
+  field('answer-ui-waiting-task').closest('form').requestSubmit(); await tick();
+  const retriedReply = routed.filter(body => body.action === 'answer').at(-1);
+  assert(retriedReply.request_id === reply.request_id,
+    'Session navigation changed the pending answer retry key');
+  window.receiveNative({ok:false,completed_action:'answer',bridge_id:retriedReply.bridge_id,
+    message:'Fixture: waiting for your answer'}); await tick();
+  // A complete answer round can happen between polls. A new question must not
+  // reuse the previous round's text or idempotency key.
+  const nextQuestion = {...fixtureTask, changed_at:100,
+    result:JSON.stringify({summary:'Which base branch?',outcome:'needs_clarification',
+      pr_url:'',validation:'Waiting for another answer'})};
+  window.receiveNative({ok:true,tasks:[nextQuestion],tasks_revision:999999999}); await tick();
+  assert(field('answer-ui-waiting-task').value === '', 'New question retained old answer');
+  edit(field('answer-ui-waiting-task'), 'Use main'); await tick();
+  field('answer-ui-waiting-task').closest('form').requestSubmit(); await tick();
+  const nextReply = routed.filter(body => body.action === 'answer').at(-1);
+  assert(nextReply.request_id !== reply.request_id, 'New question reused prior answer key');
+  window.receiveNative({ok:false,completed_action:'answer',bridge_id:nextReply.bridge_id,
+    message:'Fixture: waiting for another answer'}); await tick();
   const remoteTask = {...fixtureTask, id:'ui-telegram-task', source:'telegram', created_at:2};
   window.receiveNative({ok:true,tasks:[fixtureTask,remoteTask],tasks_revision:999999999});
   await tick();
   assert(!field('answer-ui-telegram-task'), 'Desktop can answer another Telegram identity');
-  const currentTask = document.querySelector('[aria-label="Current task"]');
-  currentTask.value = remoteTask.id;
-  currentTask.dispatchEvent(new Event('change', {bubbles:true})); await tick();
+  document.querySelector('[data-session="ui-telegram-task"]').click(); await tick();
   assert(document.querySelector('[aria-label="Task status"]').textContent.includes(
     'Reply to this task in Telegram'), 'Missing Telegram reply guidance');
-  currentTask.value = fixtureTask.id;
-  currentTask.dispatchEvent(new Event('change', {bubbles:true})); await tick();
+  assert(field('send').disabled, 'Desktop Stop available for Telegram task');
+  document.querySelector('[data-session="ui-waiting-task"]').click(); await tick();
   assert(document.querySelector('.task-status').textContent.includes(fixtureTask.id),
     'Current task selection does not drive Codex status');
   window.receiveNative({ok:true,tasks:[fixtureTask],tasks_revision:999999999}); await tick();

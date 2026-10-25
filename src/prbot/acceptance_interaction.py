@@ -71,7 +71,8 @@ async def check_interaction(values, fields, evidence):
 
             native.on_event = on_event
             evidence["sdk_incremental_events"] = False
-            conversation = application.conversation(rid, "desktop", "Issue")
+            # New desktop tasks use the request ID as their conversation ID.
+            conversation = rid
             fields.extend(
                 conversation + ":" + message
                 for message in (

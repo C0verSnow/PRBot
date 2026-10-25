@@ -45,6 +45,9 @@ def _create_schema():
                     id TEXT PRIMARY KEY, actor TEXT, source TEXT, mode TEXT,
                     conversation TEXT, status TEXT, payload TEXT, result TEXT,
                     pid INTEGER, created REAL, changed REAL);
+                CREATE TABLE IF NOT EXISTS pending_submissions (
+                    id TEXT PRIMARY KEY, actor TEXT, source TEXT, mode TEXT,
+                    conversation TEXT, payload TEXT, created REAL);
                 CREATE TABLE IF NOT EXISTS task_events (
                     sequence INTEGER PRIMARY KEY AUTOINCREMENT, task_id TEXT,
                     kind TEXT, text TEXT, created REAL);
