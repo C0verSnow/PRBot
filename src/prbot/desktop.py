@@ -240,6 +240,7 @@ def show(check_output=None):
                     "retry_save",
                     "tasks",
                     "models",
+                    "verify_delivery",
                 }
             )
             if (
@@ -258,6 +259,7 @@ def show(check_output=None):
                 "configuration",
                 "cancel_task",
                 "models",
+                "verify_delivery",
             }
             if action in self.inflight:
                 return
@@ -338,11 +340,18 @@ def show(check_output=None):
                     else:
                         app_service = (
                             ConversationService.for_desktop_read()
-                            if action in {"history", "tasks"}
+                            if action in {"history", "tasks", "verify_delivery"}
                             else ConversationService()
                         )
                         actor = "local:" + getpass.getuser()
-                        if action == "submit_message":
+                        if action == "verify_delivery":
+                            extra["delivery_verification"] = asyncio.run(
+                                asyncio.wait_for(
+                                    app_service.verify_task_delivery(request.get("task_id"), actor),
+                                    timeout=45,
+                                )
+                            )
+                        elif action == "submit_message":
                             task = asyncio.run(
                                 app_service.submit(
                                     request.get("request_id"),
@@ -395,6 +404,10 @@ def show(check_output=None):
                     extra = (
                         {"model_catalog": {"models": [], "error": str(error)}}
                         if action == "models"
+                        else {"delivery_verification": {
+                            "task_id": request.get("task_id"), "error": str(error)
+                        }}
+                        if action == "verify_delivery"
                         else {
                             "history_error": {
                                 "request_id": request.get("request_id"),
@@ -424,6 +437,12 @@ def show(check_output=None):
                             }
                         }
                         if action == "models"
+                        else {"delivery_verification": {
+                            "task_id": request.get("task_id"),
+                            "error": "Verification failed. Check connections and "
+                            "retry verification.",
+                        }}
+                        if action == "verify_delivery"
                         else {},
                     )
 

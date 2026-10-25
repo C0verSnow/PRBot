@@ -30,6 +30,12 @@ class SDKFailure(DeliveryError):
             "protocol": "Unexpected SDK response. Reinstall the application and inspect logs.",
             "model": "Selected model is unavailable or was rejected. Refresh models, choose a "
             "model your account can use, and start a new task. No fallback was used.",
+            "models_empty": "Codex returned no visible text models. Check the active Codex "
+            "account and sign-in, then retry Refresh models. Default is still an explicit choice.",
+            "models_pagination": "The model list could not be fully loaded. Retry Refresh "
+            "models. If this continues, update or reinstall PRBot.",
+            "models": "The model list could not be loaded. Check Codex sign-in and network, "
+            "then retry Refresh models.",
             "failure": "SDK check failed. Inspect the stage and error type in logs.",
         }
         super().__init__(
@@ -55,7 +61,10 @@ def worker_failure(output):
             "models",
         }:
             raise ValueError
-        if kind not in {"failure", "authentication", "network", "timeout", "model"}:
+        if kind not in {
+            "failure", "authentication", "network", "timeout", "model",
+            "models_empty", "models_pagination",
+        }:
             raise ValueError
         if name not in {
             "FileNotFoundError",
@@ -82,7 +91,9 @@ def worker_failure(output):
         }:
             raise ValueError
         code = kind if kind != "failure" else stage
-        if code not in {"dependencies", "runtime", "auth", "initialize"} and kind == "failure":
+        if code not in {"dependencies", "runtime", "auth", "initialize", "models"} and (
+            kind == "failure"
+        ):
             code = "failure"
         failure = SDKFailure(code, stage, name)
         failure.file_target = error.get("file_target", "unspecified")

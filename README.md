@@ -52,7 +52,15 @@ for the packaging checks and remote CI evidence.
 - History uses stable message IDs, source/actor separation and cursor pagination. Credentials are redacted before local journaling and remote archival. Bootstrap secrets, Telegram/Redis tokens, access tokens and refresh tokens are not returned by the bridge. The explicit ID token editor is the only credential field and is masked. SDK progress forwards only allowlisted status and filtered assistant commentary; command output and reasoning stay internal.
 - Background Service manually starts/stops Telegram polling in the current login session. Health reports older than 15 seconds are marked Stale. Desktop tasks run in the window process so they use its ID token edits; closing the window interrupts them. Telegram tasks owned by a manually running background service continue. There is no login startup option or persistent launchd registration.
 
-Task results record Codex's code-completion report, the remotely observed PR state, target Issue state and required CI result separately. `Delivered · verification incomplete` preserves the PR link when checks are pending, failed or unreadable; it is not full acceptance. Verification is a timestamped task-result snapshot, not continuous monitoring of GitHub. Existing historical results are retained unchanged. Only explicit submission shows `Submitting…`; background refreshes do not change the Send label.
+Task completion follows Codex's conversation result. PRBot does not automatically downgrade it because GitHub checks are pending or unavailable. **Verify delivery** is an optional, read-only action on a result with a PR link: it shows loading, current PR/Issue/CI facts, a check time, and errors with retry. It never changes the conversation status, republishes a message or reruns Codex. Older delivery snapshots remain available under **Saved delivery details**; known failures remain visible. Legacy `delivered_unverified` tasks display **Delivered**. Only explicit submission shows `Submitting…`; background refreshes do not change the Send label.
+
+## Models and continuous conversations (Issue #25)
+
+The model picker reads all pages of the active Codex SDK catalog, deduplicates model slugs and filters hidden/non-text models. **Refresh models** immediately changes to **Refreshing models…**; editing remains available. Success reports the model count, including an unchanged list. Empty lists, sign-in failures, timeouts and bridge failures show an inline reason and **Retry loading models**. A failed refresh keeps the last loaded list. Applying an ID token clears the previous account's options before reloading. Model choices are not hardcoded; Codex checks account access when the task runs, and PRBot never silently changes a selected model.
+
+Saved messages, live events and the final reply appear in one continuous conversation using the main page scroll. Role, channel, time and delivery status are secondary message metadata. Reading older content holds the scroll position; following near the bottom keeps new replies in view.
+
+See [Issue #25 design, regression scenarios and remote evidence](docs/Issue25-模型刷新与连续对话.md).
 
 ## Desktop interaction updates (Issue #11)
 

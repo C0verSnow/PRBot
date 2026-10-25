@@ -43,3 +43,14 @@ def test_repeated_cursor_fails_instead_of_looping_forever():
     with pytest.raises(RuntimeError, match="cursor"):
         catalog(client)
     client._client.request.assert_called_once()
+
+
+def test_pinned_sdk_supports_catalog_pagination_seam():
+    import inspect
+
+    from openai_codex.client import CodexClient
+    from openai_codex.generated.v2_all import ModelListResponse
+
+    assert "response_model" in inspect.signature(CodexClient.request).parameters
+    page = ModelListResponse.model_validate({"data": [], "nextCursor": "page-2"})
+    assert page.next_cursor == "page-2"

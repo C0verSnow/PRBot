@@ -48,22 +48,41 @@ def safe_text(text, request):
 
 
 def catalog(codex):
-    """Expose only visible text models from the SDK's current account catalog."""
+    """Read every visible text model; keep the server's order and model slugs.
+
+    Based on OpenAI Codex model/list cursor pagination:
+    https://github.com/openai/codex/tree/main/sdk/python
+    SDK 0.163.0's convenience method omits cursor. Its existing lower-level
+    request method and response schema handle subsequent pages on this same
+    authenticated connection. Keep this compatibility seam covered by CI.
+    """
     page = codex.models(include_hidden=False)
     models = []
     seen = set()
-    for item in page.data:
-        if item.hidden or (
-            item.input_modalities is not None and "text" not in item.input_modalities
-        ):
-            continue
-        if item.model and item.model not in seen:
-            seen.add(item.model)
-            models.append({"id": item.model, "name": item.display_name, "default": item.is_default})
-    # The pinned high-level SDK does not expose pagination. Never silently claim
-    # that an incomplete catalog is the full set of selectable models.
-    if page.next_cursor:
-        raise RuntimeError("Model catalog is incomplete; refresh models or use the default")
+    cursors = set()
+    while True:
+        for item in page.data:
+            if item.hidden or (
+                item.input_modalities is not None and "text" not in item.input_modalities
+            ):
+                continue
+            if item.model and item.model not in seen:
+                seen.add(item.model)
+                models.append(
+                    {"id": item.model, "name": item.display_name, "default": item.is_default}
+                )
+        if not page.next_cursor:
+            break
+        if page.next_cursor in cursors or len(cursors) >= 100:
+            raise RuntimeError("Model catalog cursor did not finish")
+        cursors.add(page.next_cursor)
+        page = codex._client.request(
+            "model/list",
+            {"includeHidden": False, "cursor": page.next_cursor},
+            response_model=type(page),
+        )
+    if not models:
+        raise RuntimeError("No visible text models returned by Codex")
     return models
 
 
@@ -261,7 +280,11 @@ def run():
             )
         ):
             kind = "authentication"
-        elif "model" in message and _stage in {"turn", "models"}:
+        elif _stage == "models" and "no visible text models" in message:
+            kind = "models_empty"
+        elif _stage == "models" and "cursor" in message:
+            kind = "models_pagination"
+        elif "model" in message and _stage == "turn":
             kind = "model"
         elif "timed out" in message or "timeout" in message:
             kind = "timeout"

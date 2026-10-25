@@ -50,7 +50,7 @@ input:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 3p
 .close-settings:hover { background: #eae8e2; }
 .close-settings:active { background: #dedbd3; }
 .close-settings:focus-visible { outline: 2px solid #55544f; outline-offset: 2px; }
-.execution-feed { overflow-y: auto; max-height: min(360px, 45vh); overflow-anchor: none; overscroll-behavior: contain; }
+.execution-feed { overflow: visible; max-height: none; }
 
 .task-core { flex: none; width: 32px; height: 32px; margin: 0; }
 .task-core.queued { border-style: dashed; }
