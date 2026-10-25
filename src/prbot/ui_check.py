@@ -177,8 +177,18 @@ true;
             event = Quartz.CGEventCreateScrollWheelEvent(
                 None, Quartz.kCGScrollEventUnitPixel, 1, int(value["delta"])
             )
+            point = (
+                value["x"],
+                value["y"] if web.isFlipped() else web.bounds().size.height - value["y"],
+            )
+            screen = web.window().convertPointToScreen_(web.convertPoint_toView_(point, None))
+            screen_height = AppKit.NSScreen.screens()[0].frame().size.height
+            Quartz.CGEventSetLocation(event, (screen.x, screen_height - screen.y))
+            Quartz.CGEventSetIntegerValueField(
+                event, Quartz.kCGMouseEventWindowUnderMousePointer, web.window().windowNumber()
+            )
             native = AppKit.NSEvent.eventWithCGEvent_(event)
-            target = web.hitTest_((value["x"], web.bounds().size.height - value["y"]))
+            target = web.hitTest_(point)
             (target or web).scrollWheel_(native)
             web.evaluateJavaScript_completionHandler_("window.__wheelRequest = null", None)
         AppHelper.callLater(0.05, wheel_poll)
@@ -261,6 +271,16 @@ true;
     window.receiveNative({ok:true,completed_action:action,
       ...(request ? {bridge_id:request.bridge_id} : {}),...data});
   };
+  // Catalog options come from native SDK discovery, never a hardcoded model list.
+  const chooseModel = value => {
+    Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')
+      .set.call(field('model'), value);
+    field('model').dispatchEvent(new Event('change', {bubbles:true}));
+  };
+  complete('models', {model_catalog:{models:[{id:'fixture-model',name:'Fixture',default:true}]}});
+  await tick();
+  assert(field('model').options.length === 2, 'Model catalog not rendered');
+  chooseModel('fixture-model'); await tick();
   // Drain a pre-existing history request, then queued correlated requests.
   complete('history'); await tick(); complete('history'); await tick();
   for (const link of ['https://github.com/owner/repo',
@@ -274,6 +294,8 @@ true;
   field('composer').requestSubmit(); field('composer').requestSubmit(); await tick();
   const sent = requests.filter(request => request.action === 'submit_message');
   assert(sent.length === 1 && sent[0].mode === 'GitHub', 'Duplicate or wrong routing');
+  assert(sent[0].model === 'fixture-model', 'Selected model did not reach native submission');
+  assert(field('model').disabled, 'Model changed while submission was pending');
   assert(field('send').getAttribute('aria-label') === 'Submitting…');
   assert(document.querySelector('[data-state="submitting"]'), 'Submitting state missing');
   assert(document.querySelector('[aria-label="Conversation history"]').textContent.includes('fix'),
@@ -285,9 +307,11 @@ true;
   field('composer').requestSubmit(); await tick();
   const retry = requests.filter(request => request.action === 'submit_message').at(-1);
   assert(retry.request_id === sent[0].request_id, 'Retry changed task ID');
+  assert(retry.model === sent[0].model, 'Retry changed selected model');
   // New during submission must not stop the task or let a late acceptance steal selection.
   field('new-session').click(); await tick();
   assert(field('draft').value === '' && field('target-link').value === '');
+  assert(field('model').value === '', 'New task did not restore default model');
   const first = {id:retry.request_id,mode:'Pull Request',source:'desktop',status:'queued',
     conversation_id:retry.request_id,created_at:1,changed_at:1,
     user_text:'fix',title:'fix',events:[]};
@@ -355,6 +379,24 @@ true;
     conversation_id:'legacy',message_id:'older',task_id:'remote-task',role:'user',
     source:'desktop',sequence:2,content:'More archived context'}]}); await tick();
   assert(history.querySelectorAll('.history-message').length === 2, 'History page not appended');
+  [...document.querySelectorAll('aside button')]
+    .find(button => button.textContent === 'Refresh history').click(); await tick();
+  respondHistory(latestHistory(),{reset:false,messages:[{
+    conversation_id:'legacy',message_id:'telegram-code',task_id:'remote-task',role:'user',
+    source:'telegram',sequence:3,
+    content:'Telegram request\\n```text\\n' + 'x'.repeat(900) + '\\n```'},
+    {conversation_id:'legacy',message_id:'structured-result',task_id:'remote-task',
+      role:'assistant',source:'desktop',sequence:4,content:JSON.stringify({
+        summary:'Completed\\nSecond paragraph',validation:'Remote CI passed',
+        pr_url:'https://github.com/owner/repo/pull/21',delivery:{pr:{unexpected:true}}})}]});
+  await tick();
+  const cards = [...history.querySelectorAll('.message-card')];
+  assert(cards.length === 4 && cards.every(card => card.querySelector('.message-meta time')),
+    'Messages do not share role, channel and time metadata');
+  assert(history.querySelector('[data-source="telegram"] pre code'), 'Code snippet not rendered');
+  assert(history.querySelector('[data-role="assistant"]').textContent.includes('Remote CI passed'),
+    'Structured result lost validation');
+  assert(cards.every(card => card.scrollWidth <= card.clientWidth + 1), 'Long message overflow');
   // Sending from an archived session must use a fresh task UUID, never the remote ID.
   edit(field('target-link'),'https://github.com/owner/repo');
   edit(field('draft'),'New task from saved context'); await tick();

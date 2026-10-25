@@ -28,6 +28,8 @@ class SDKFailure(DeliveryError):
             "auth_storage": "Sign-in refresh failed. Sign in with Codex again.",
             "launch": "SDK could not start. Check installation and executable permissions.",
             "protocol": "Unexpected SDK response. Reinstall the application and inspect logs.",
+            "model": "Selected model is unavailable or was rejected. Refresh models, choose a "
+            "model your account can use, and start a new task. No fallback was used.",
             "failure": "SDK check failed. Inspect the stage and error type in logs.",
         }
         super().__init__(
@@ -50,9 +52,10 @@ def worker_failure(output):
             "initialize",
             "account",
             "turn",
+            "models",
         }:
             raise ValueError
-        if kind not in {"failure", "authentication", "network", "timeout"}:
+        if kind not in {"failure", "authentication", "network", "timeout", "model"}:
             raise ValueError
         if name not in {
             "FileNotFoundError",
@@ -114,12 +117,12 @@ class CodexAdapter:
         self.environment = environment or {}
         self.on_event = on_event
 
-    async def invoke(self, path, prompt, schema, timeout):
+    async def invoke(self, path, prompt, schema, timeout, *, model=None):
         # The parent owns cleanup even when cancellation must SIGKILL the worker.
         with tempfile.TemporaryDirectory(prefix="prbot-sdk-controller-") as private:
-            return await self._invoke(path, prompt, schema, timeout, private)
+            return await self._invoke(path, prompt, schema, timeout, private, model=model)
 
-    async def _invoke(self, path, prompt, schema, timeout, private):
+    async def _invoke(self, path, prompt, schema, timeout, private, *, model=None):
         original_auth = self.auth
         command = (
             [sys.executable, "sdk-worker"]
@@ -160,6 +163,7 @@ class CodexAdapter:
                             "path": str(path),
                             "prompt": prompt,
                             "schema": schema,
+                            "model": model,
                         }
                     ).encode()
                     + b"\n"
@@ -218,6 +222,16 @@ class CodexAdapter:
             except ProcessLookupError:
                 pass
             await proc.wait()
+
+    async def list_models(self):
+        from prbot.paths import data_dir
+
+        path = data_dir() / "sdk-startup"
+        path.mkdir(mode=0o700, exist_ok=True)
+        try:
+            return await self.invoke(path, "__prbot_models__", {}, 30)
+        except TimeoutError:
+            raise SDKFailure("timeout", "models", "TimeoutError") from None
 
     async def check_auth(self):
         from prbot.paths import data_dir

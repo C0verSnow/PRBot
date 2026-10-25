@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { Draft, Message, NativeResult, SendAction, Task } from '../types';
-import { TaskResult } from './TaskResult';
+import { MessageCard } from './MessageCard';
 
 export function HistoryBrowser({ result, send, busy, session, refreshKey, onSessions, task, optimistic }: {
   task?: Task; optimistic: Draft | null; result: NativeResult; send: SendAction; busy: boolean; session: string; refreshKey: string;
@@ -44,11 +44,8 @@ export function HistoryBrowser({ result, send, busy, session, refreshKey, onSess
     {error && <div role="alert"><p>{error}</p><button className="secondary" onClick={() => load(error === 'History changed. Refresh history.' ? '0' : cursor)}>Retry loading</button></div>}
     {warning && <p role="status" className="text-xs text-muted">{warning}</p>}
     {!loading && !error && messages.length === 0 && <p className="text-xs text-muted">No saved messages in this conversation.</p>}
-    {!messages.some(message => message.role === 'user' && message.task_id === session) && (task || optimistic) && <article className="history-message"><p className="mb-2 text-xs text-muted">You{optimistic ? ' · Submitting…' : ''}</p><p className="whitespace-pre-wrap break-words">{optimistic?.text || task?.user_text || task?.title}</p></article>}
-    {messages.filter(message => !(task?.result && message.role === 'assistant' && message.task_id === task.id && message.content === task.result)).map(message => <article key={`${message.conversation_id}:${message.message_id}`} className="history-message">
-      <p className="mb-2 text-xs text-muted">{message.role === 'assistant' ? 'Codex' : 'You'} · {message.source === 'telegram' ? 'Telegram' : 'Desktop'} · {new Date(message.sequence * 1000).toLocaleString()}</p>
-      {message.role === 'assistant' ? <TaskResult content={message.content} send={send} busy={busy} /> : <p className="whitespace-pre-wrap break-words text-sm leading-7">{message.content}</p>}
-    </article>)}
+    {!messages.some(message => message.role === 'user' && message.task_id === session) && (task || optimistic) && <MessageCard role="user" source={task?.source || 'desktop'} created={optimistic?.created_at || task?.created_at || Date.now() / 1000} pending={!!optimistic} content={optimistic?.text || task?.user_text || task?.title || ''} send={send} busy={busy} />}
+    {messages.filter(message => !(task?.result && message.role === 'assistant' && message.task_id === task.id && message.content === task.result)).map(message => <MessageCard key={`${message.conversation_id}:${message.message_id}`} role={message.role} source={message.source} created={message.sequence} content={message.content} send={send} busy={busy} />)}
     {cursor !== '0' && <button className="secondary" disabled={loading} onClick={() => load(cursor)}>Load more messages</button>}
   </section>;
 }

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Action, NativeResult, RequestData, SendAction } from './types';
-const background = new Set<Action>(['ready', 'tasks', 'history', 'connections', 'configuration', 'cancel_task']);
+const background = new Set<Action>(['ready', 'tasks', 'history', 'connections', 'configuration', 'cancel_task', 'models']);
 export function useNativeBridge() {
   const [result, setResult] = useState<NativeResult>({ ok: true });
   const [busy, setBusy] = useState(false);
@@ -94,6 +94,7 @@ export function useNativeBridge() {
         if (active.current === action) { active.current = null; setBusy(false); setSubmitting(false); }
         const message = 'Request timed out. Check task status before retrying.';
         setResult(previous => ({ ...previous, ok: false, message,
+          ...(action === 'models' ? { model_catalog: { models: [], error: 'Models request timed out. Retry loading models.' } } : {}),
           ...(action === 'history' ? { history_error: { request_id: deadline.request_id, message } } : {}) }));
         if (action === 'history' && queuedHistory.current) {
           const data = queuedHistory.current; queuedHistory.current = null; send('history', data);
