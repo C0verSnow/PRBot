@@ -785,10 +785,13 @@ true;
   conversationScroll.scrollTop = 0;
   conversationScroll.dispatchEvent(new Event('scroll')); await tick();
   const draftValue = field('draft').value;
+  const beforeFeedbackTop = conversationScroll.scrollTop;
   fixtureTask.events.push({sequence:37,kind:'text',created:38,text:'Ready for your answer.'});
   window.receiveNative({ok:true,tasks:[JSON.parse(JSON.stringify(fixtureTask))],
     tasks_revision:999999999}); await tick();
-  assert(conversationScroll.scrollTop === 0, 'New feedback interrupted historical reading');
+  assert(conversationScroll.scrollTop === 0,
+    `New feedback interrupted historical reading: before=${beforeFeedbackTop}, ` +
+    `after=${conversationScroll.scrollTop}, height=${conversationScroll.scrollHeight}`);
   assert(document.activeElement === field('draft') && field('draft').value === draftValue,
     'Feedback changed composer focus or text');
   conversationScroll.scrollTop = conversationScroll.scrollHeight;

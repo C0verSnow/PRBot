@@ -77,7 +77,7 @@ select { max-width: 100%; padding: 6px; }
 
 /* The document is a fixed app viewport. Real content stays reachable in these scrollers. */
 .workspace-shell { height: 100vh; height: 100dvh; min-height: 0; overflow: hidden; }
-.workspace-main { height: 100%; overscroll-behavior: contain; overflow-wrap: anywhere; }
+.workspace-main { height: 100%; overflow-anchor: none; overscroll-behavior: contain; overflow-wrap: anywhere; }
 .sidebar-scroll, .settings-content, .history-sessions { overscroll-behavior: contain; }
 .composer textarea { max-height: min(320px, 50vh); overflow-y: auto; overscroll-behavior: contain; }
 .message-card { min-width: 0; }
