@@ -790,7 +790,7 @@ true;
   assert([...feed.querySelectorAll('[data-role="system"]')]
     .some(card => card.textContent.includes('Waiting for an answer.')),
     'Runtime status was mislabeled as Codex');
-  field('draft').focus();
+  field('draft').focus({preventScroll:true}); await tick();
   conversationScroll.scrollTop = 0;
   conversationScroll.dispatchEvent(new Event('scroll')); await tick();
   const draftValue = field('draft').value;
