@@ -548,6 +548,14 @@ true;
   edit(field('id-token'), 'unsaved-connection-draft'); field('id-token').focus(); await tick();
   const tokenNode = field('id-token');
   const stable = {ok:true, status:{state:'stopped',loaded:false},tasks:[]};
+  const receiveBeforeStable = window.receiveNative;
+  const parkedNativeReplies = [];
+  // Measure only the unchanged payloads; replay legitimate native completions
+  // after the measurement instead of counting their unrelated DOM updates.
+  window.receiveNative = payload => {
+    if (payload === stable) receiveBeforeStable(payload);
+    else parkedNativeReplies.push(payload);
+  };
   window.receiveNative(stable); await tick();
   let mutations = 0;
   const stableObserver = new MutationObserver(() => mutations++);
@@ -558,6 +566,8 @@ true;
   assert(mutations === 0, 'Unchanged background status mutated Settings');
   assert(field('id-token') === tokenNode && document.activeElement === tokenNode,
     'Polling remounted or blurred connection input');
+  window.receiveNative = receiveBeforeStable;
+  for (const payload of parkedNativeReplies) receiveBeforeStable(payload);
   const switchStart = performance.now();
   await select('Workspace');
   assert(performance.now() - switchStart < 500, 'Settings navigation blocked by connections');
