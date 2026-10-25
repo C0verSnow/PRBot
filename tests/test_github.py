@@ -87,6 +87,60 @@ async def test_success_does_not_hide_same_name_failure(failure_source):
         await gh.close()
 
 
+@pytest.mark.parametrize("scenario", [
+    "replaced", "other_workflow", "other_sha", "other_branch", "older_success",
+    "other_repository", "missing_job", "missing_metadata", "failed_run", "failed_check",
+    "status_failure", "missing_successor_suite",
+])
+async def test_cancelled_duplicate_requires_a_proven_same_workflow_job_replacement(scenario):
+    # Mirrors the PR #22 API response: latest check-runs includes both the
+    # cancelled push job and its newer, passing pull-request replacement.
+    old = {"status": "completed", "conclusion": "cancelled", "head_sha": "sha",
+           "workflow_id": 3, "head_branch": "feature/review", "run_number": 270,
+           "check_suite_id": 10, "head_repository": {"id": 2}}
+    new = {**old, "conclusion": "success", "run_number": 271, "check_suite_id": 20}
+    cancelled = {"name": "test", "status": "completed", "conclusion": "cancelled",
+                 "check_suite": {"id": 10}}
+    replacement = {**cancelled, "conclusion": "success", "check_suite": {"id": 20}}
+    statuses = []
+    if scenario == "other_workflow":
+        new["workflow_id"] = 4
+    elif scenario == "other_sha":
+        new["head_sha"] = "different-sha"
+    elif scenario == "other_branch":
+        new["head_branch"] = "feature/other"
+    elif scenario == "other_repository":
+        new["head_repository"] = {"id": 5}
+    elif scenario == "older_success":
+        new["run_number"] = 269
+    elif scenario == "missing_job":
+        replacement["name"] = "other-job"
+    elif scenario == "missing_metadata":
+        old.pop("check_suite_id")
+    elif scenario == "missing_successor_suite":
+        new.pop("check_suite_id")
+        replacement.pop("check_suite")
+    elif scenario == "failed_run":
+        new["conclusion"] = "failure"
+    elif scenario == "failed_check":
+        cancelled["conclusion"] = "failure"
+    elif scenario == "status_failure":
+        statuses = [{"context": "test", "state": "failure"}]
+    gh = GitHub("test")
+    gh.request = AsyncMock(side_effect=[
+        {"check_runs": [replacement, cancelled]}, {"statuses": statuses},
+        {"workflow_runs": [new, old]},
+    ])
+    try:
+        if scenario == "replaced":
+            assert await gh.checks("o/r", "sha", ("test",))
+        else:
+            with pytest.raises(DeliveryError, match="checks failed"):
+                await gh.checks("o/r", "sha", ("test",))
+    finally:
+        await gh.close()
+
+
 async def test_pending_workflow_on_second_page_prevents_delivery():
     gh = GitHub("test")
     gh.request = AsyncMock(side_effect=[

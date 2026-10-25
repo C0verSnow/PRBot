@@ -25,6 +25,8 @@ for the scroll regression scenarios and validation limits.
 
 PR #22 follow-up review also preserves read-only ID token fetching, labels Codex clarification
 events correctly, and keeps messages readable when saved timestamps are out of range.
+Delivery verification also recognizes a cancelled duplicate workflow only when a newer run
+on the same commit has a proven successful replacement for that job; other failures still block.
 See [the full-branch review](docs/PR22-全面复盘.md) for scope and verification evidence.
 
 ## Use
