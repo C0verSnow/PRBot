@@ -192,9 +192,14 @@ true;
                 event, Quartz.kCGMouseEventWindowUnderMousePointer, web.window().windowNumber()
             )
             native = AppKit.NSEvent.eventWithCGEvent_(event)
-            target = web.hitTest_(point)
-            (target or web).scrollWheel_(native)
-            web.evaluateJavaScript_completionHandler_("window.__wheelRequest = null", None)
+            # WindowServer assigns the event to the correct window/responder.
+            # Calling WKWebView.scrollWheel_ directly lacks that window routing.
+            Quartz.CGWarpMouseCursorPosition((screen.x, screen_height - screen.y))
+            Quartz.CGEventPost(Quartz.kCGHIDEventTap, event)
+            info = {"delta": native.scrollingDeltaY(), "window": native.windowNumber()}
+            web.evaluateJavaScript_completionHandler_(
+                "window.__wheelRequest = null; window.__wheelInfo = " + json.dumps(info), None
+            )
         AppHelper.callLater(0.05, wheel_poll)
 
     def wheel_poll():
@@ -763,11 +768,13 @@ true;
   const wheel = async (element, delta) => {
     const bounds = element.getBoundingClientRect();
     window.__wheelRequest = {x:bounds.left + 20,y:bounds.top + 20,delta};
-    await waitFor(() => !window.__wheelRequest); await tick();
+    await waitFor(() => !window.__wheelRequest);
+    await new Promise(resolve => setTimeout(resolve, 120));
   };
   mainScroll.scrollTop = 0;
   await wheel(mainScroll, -900);
-  assert(mainScroll.scrollTop > 0, 'Native wheel did not scroll long task content');
+  assert(mainScroll.scrollTop > 0,
+    'Native wheel did not scroll long task content: ' + JSON.stringify(window.__wheelInfo));
   for (let count = 0; count < 4; count++) await wheel(mainScroll, -900);
   assert(document.scrollingElement.scrollTop === 0, 'Native wheel escaped into blank document');
   assert(mainScroll.scrollTop <= mainScroll.scrollHeight - mainScroll.clientHeight + 1,
