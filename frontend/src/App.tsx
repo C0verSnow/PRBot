@@ -6,13 +6,14 @@ import { HistoryBrowser } from './components/HistoryBrowser';
 import { TaskStatus } from './components/TaskStatus';
 import { TaskFeed } from './components/TaskFeed';
 import { SettingsPanel, serviceLabel } from './components/SettingsPanel';
-import type { Draft, HistorySession, Workspace } from './types';
+import type { AnswerDraft, Draft, HistorySession, Workspace } from './types';
 const fresh = (workspace: Workspace = 'GitHub'): Draft => ({ link: '', text: '', request_id: crypto.randomUUID(), workspace, created_at: Date.now() / 1000 });
 export function App() {
   const { result, busy, submitting, cancelling, send } = useNativeBridge();
   const [initial] = useState(() => fresh());
   const [view, setView] = useState<Workspace>('GitHub');
   const [drafts, setDrafts] = useState<Record<string, Draft>>({ [initial.request_id]: initial });
+  const [answers, setAnswers] = useState<Record<string, AnswerDraft>>({});
   const [selected, setSelected] = useState(initial.request_id);
   const [expanded, setExpanded] = useState(true);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -24,6 +25,7 @@ export function App() {
   const [refresh, setRefresh] = useState(0);
   const [seen, setSeen] = useState<Record<string, string>>({});
   const submitted = useRef<Draft | null>(null);
+  const submissions = useRef(new Map<string, Draft>());
   const cancelDialog = useRef<HTMLDialogElement>(null);
   useEffect(() => {
     if (cancelOpen) cancelDialog.current?.showModal();
@@ -46,12 +48,27 @@ export function App() {
     if (!task || task.id === accepted.current) return;
     accepted.current = task.id;
     setRefresh(value => value + 1);
-    setDrafts(previous => {
-      const sent = submitted.current;
-      if (!sent || task.id !== sent.request_id || !previous[task.id]) return previous;
-      return { ...previous, [task.id]: fresh(previous[task.id].workspace) };
-    });
   }, [result.accepted]);
+  useEffect(() => {
+    // Polling can acknowledge a submission whose bridge reply timed out or was lost.
+    // Retire its idempotency key once the task exists, while preserving any edits
+    // made after a timeout. A later accepted reply must not clear those edits.
+    const tasks = [...(result.tasks || []), ...(result.accepted ? [result.accepted] : [])];
+    setDrafts(previous => {
+      let next = previous;
+      for (const task of tasks) {
+        const current = previous[task.id];
+        if (!current || current.request_id !== task.id) continue;
+        const sent = submissions.current.get(task.id);
+        const replacement = fresh(current.workspace);
+        if (!sent || current.link !== sent.link || current.text !== sent.text) {
+          replacement.link = current.link; replacement.text = current.text;
+        }
+        next = { ...next, [task.id]: replacement };
+      }
+      return next;
+    });
+  }, [result.tasks, result.accepted]);
   // A badge counts unread task state revisions (including one new accepted task),
   // not timer ticks or repeated event delivery. Reading a session acknowledges it.
   const counts: Record<string, number> = {};
@@ -59,6 +76,17 @@ export function App() {
     const revision = `${task.status}:${task.changed_at || task.created_at}`;
     counts[task.id] = task.id !== selected && seen[task.id] !== revision ? 1 : 0;
   }
+  useEffect(() => {
+    // Keep answer text and its retry key across navigation, until the backend
+    // confirms that this task has left its waiting-for-answer state.
+    setAnswers(previous => {
+      const finished = (result.tasks || []).filter(task => previous[task.id] && (task.status !== 'needs_clarification' || previous[task.id].revision !== `${task.changed_at || task.created_at}:${task.result || ''}`));
+      if (!finished.length) return previous;
+      const next = { ...previous };
+      for (const task of finished) delete next[task.id];
+      return next;
+    });
+  }, [result.tasks]);
   const selectedRevision = selectedTask ? `${selectedTask.status}:${selectedTask.changed_at || selectedTask.created_at}` : '';
   useEffect(() => {
     if (selectedRevision) setSeen(previous => previous[selected] === selectedRevision ? previous : { ...previous, [selected]: selectedRevision });
@@ -84,10 +112,11 @@ export function App() {
       <div className="mx-auto max-w-[760px] px-6 pb-8">
         <h1 className="mb-6 break-words font-serif text-[30px]">{selectedTask?.title || (view === 'GitHub' ? 'What would you like to change?' : 'Start a private conversation.')}</h1>
         <HistoryBrowser result={result} send={send} busy={busy} session={selected} refreshKey={`${refresh}:${selectedTask?.status || ''}`} onSessions={onSessions} task={selectedTask} optimistic={optimistic} />
-        <section aria-label="Task status" className="mb-6 space-y-3">{selectedTask && <TaskFeed key={selectedTask.id} task={selectedTask} busy={busy} send={send} />}</section>
+        <section aria-label="Task status" className="mb-6 space-y-3">{selectedTask && <TaskFeed key={selectedTask.id} task={selectedTask} busy={busy} send={send} answer={answers[selectedTask.id] || { text: '', request_id: '' }} onAnswerChange={text => setAnswers(previous => ({ ...previous, [selectedTask.id]: { text, request_id: previous[selectedTask.id]?.request_id || crypto.randomUUID(), revision: `${selectedTask.changed_at || selectedTask.created_at}:${selectedTask.result || ''}` } }))} />}</section>
         <TaskStatus task={selectedTask} submitting={currentSubmitting} />
         <Composer stopPending={cancelling && stoppingTask.current === selected} mode={view} draft={draft} task={selectedTask} onChange={value => setDrafts(previous => ({ ...previous, [selected]: value }))} busy={busy} submitting={currentSubmitting} onNew={() => newSession()} onCancel={() => setCancelOpen(true)} onStop={() => { if (selectedTask && !cancelling) { stoppingTask.current = selectedTask.id; send('cancel_task', { task_id: selectedTask.id }); } }} onSend={() => {
           submitted.current = { ...draft };
+          submissions.current.set(draft.request_id, { ...draft });
           // Every new submission has its own session/task identity. Continue task
           // answers use the existing task ID and saved conversation context.
           if (selected !== draft.request_id) { setSelected(draft.request_id); setDrafts(previous => ({ ...previous, [selected]: fresh(view), [draft.request_id]: draft })); }

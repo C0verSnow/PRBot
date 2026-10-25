@@ -61,7 +61,7 @@ Chat History 可浏览本地及当前授权 Telegram 用户的消息，保留会
 
 ### Issue #15: readable history and local storage
 
-Chat History expands a sidebar list of Issue, Pull Request and private sessions with loading, empty and retry feedback. Selecting a titled conversation loads its saved messages with pagination. The latest 100 task records provide live status; older archived sessions remain accessible. GitHub workspace replaces the separate Issue/PR pages. See the Issue #19 section for current controls.
+Chat History expands a sidebar list of Issue, Pull Request and private sessions with loading, empty and retry feedback. Selecting a titled conversation loads its saved messages with pagination. All actionable tasks and the latest 100 terminal task records provide live status; older archived sessions remain accessible. GitHub workspace replaces the separate Issue/PR pages. See the Issue #19 section for current controls.
 
 The desktop creates `~/Library/Application Support/PRBot/workbench.sqlite3` at startup, before cloud configuration is required. Settings → Workspace displays its full path. Tasks and events remain in this database; confirmed Redis messages and synchronized history also get a local SQLite copy. On connection failure, cached desktop messages remain readable with a warning. Without fresh cloud authorization, Telegram records stay hidden. Writes still require Redis confirmation; failed submissions remain retryable and are never labelled saved locally. Local copies are separated by Redis endpoint and retained across token rotation. Back up the application data directory and workspace together.
 
@@ -85,3 +85,5 @@ See [Issue #15 implementation and remote validation](docs/Issue15-历史与存�
 - Completed work is not undone by Stop. Review repository changes before starting again. No local build/compilation validation was performed. Test and packaged WebKit evidence is produced by existing remote CI.
 
 Implementation, lifecycle and validation: [Issue #19](docs/Issue19-工作区与任务停止.md).
+
+PR #20 的逐模块审查、竞态修复和验证范围见[全面审查记录](docs/PR20-全面审查.md)。

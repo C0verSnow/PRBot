@@ -346,6 +346,35 @@ true;
     .find(button => button.textContent === 'Retry loading').click(); await tick();
   respondHistory(latestHistory(),{sessions:[],messages:[]}); await tick();
   assert(history.textContent.includes('No saved messages'), 'Missing empty history guidance');
+  // A lost acceptance reply must be recovered from task polling, without reusing
+  // the accepted task's key for new input or clearing edits made after timeout.
+  field('new-session').click(); await tick();
+  edit(field('target-link'),'https://github.com/owner/repo');
+  edit(field('draft'),'Submission with lost reply'); await tick();
+  field('composer').requestSubmit(); await tick();
+  const lost = requests.filter(item => item.action === 'submit_message').at(-1);
+  const realNow = Date.now;
+  try {
+    Date.now = () => realNow() + 120000;
+    await waitFor(() => field('send').getAttribute('aria-label') === 'Send');
+  } finally { Date.now = realNow; }
+  edit(field('draft'),'New input after timeout'); await tick();
+  const recovered = {id:lost.request_id,mode:'Issue',source:'desktop',status:'completed',
+    conversation_id:lost.request_id,created_at:4,changed_at:5,
+    user_text:'Submission with lost reply',title:'Recovered task',events:[]};
+  window.receiveNative({ok:true,tasks:[recovered]}); await tick();
+  assert(field('draft').value === 'New input after timeout', 'Polling lost unsent edits');
+  window.receiveNative({ok:true,completed_action:'submit_message',bridge_id:lost.bridge_id,
+    accepted:recovered}); await tick();
+  assert(field('draft').value === 'New input after timeout', 'Late acceptance cleared edits');
+  field('composer').requestSubmit(); await tick();
+  const recoveredSend = requests.filter(item => item.action === 'submit_message').at(-1);
+  assert(recoveredSend.request_id !== lost.request_id, 'Recovered submission reused old key');
+  const acceptedRecovery = {...recovered,id:recoveredSend.request_id,
+    conversation_id:recoveredSend.request_id,user_text:'New input after timeout'};
+  window.receiveNative({ok:true,tasks:[recovered,acceptedRecovery]}); await tick();
+  complete('submit_message',{accepted:acceptedRecovery,tasks:[recovered,acceptedRecovery]});
+  await tick(); assert(field('draft').value === '', 'Known submitted input not cleared');
   handler.postMessage = originalPost;
   edit(field('draft'), 'Create documentation and explain acceptance criteria'); await tick();
   document.getElementById('user').click();
@@ -594,6 +623,10 @@ true;
   assert(feed.scrollHeight - feed.scrollTop - feed.clientHeight < 2,
     'Feedback did not follow near the bottom');
   edit(field('answer-ui-waiting-task'), 'Use feature/ui'); await tick();
+  field('new-session').click(); await tick();
+  document.querySelector('[data-session="ui-waiting-task"]').click(); await tick();
+  assert(field('answer-ui-waiting-task').value === 'Use feature/ui',
+    'Session navigation lost the unsent answer');
   const answerForm = field('answer-ui-waiting-task').closest('form');
   answerForm.requestSubmit(); await tick();
   const reply = routed.find(body => body.action === 'answer');
@@ -602,6 +635,29 @@ true;
   window.receiveNative({ok:false,completed_action:'answer',bridge_id:reply.bridge_id,
     message:'Fixture: waiting for your answer'}); await tick();
   assert(field('answer-ui-waiting-task').value === 'Use feature/ui', 'Failed reply lost draft');
+  field('new-session').click(); await tick();
+  document.querySelector('[data-session="ui-waiting-task"]').click(); await tick();
+  assert(field('answer-ui-waiting-task').value === 'Use feature/ui',
+    'Session navigation lost a retryable answer');
+  field('answer-ui-waiting-task').closest('form').requestSubmit(); await tick();
+  const retriedReply = routed.filter(body => body.action === 'answer').at(-1);
+  assert(retriedReply.request_id === reply.request_id,
+    'Session navigation changed the pending answer retry key');
+  window.receiveNative({ok:false,completed_action:'answer',bridge_id:retriedReply.bridge_id,
+    message:'Fixture: waiting for your answer'}); await tick();
+  // A complete answer round can happen between polls. A new question must not
+  // reuse the previous round's text or idempotency key.
+  const nextQuestion = {...fixtureTask, changed_at:100,
+    result:JSON.stringify({summary:'Which base branch?',outcome:'needs_clarification',
+      pr_url:'',validation:'Waiting for another answer'})};
+  window.receiveNative({ok:true,tasks:[nextQuestion],tasks_revision:999999999}); await tick();
+  assert(field('answer-ui-waiting-task').value === '', 'New question retained old answer');
+  edit(field('answer-ui-waiting-task'), 'Use main'); await tick();
+  field('answer-ui-waiting-task').closest('form').requestSubmit(); await tick();
+  const nextReply = routed.filter(body => body.action === 'answer').at(-1);
+  assert(nextReply.request_id !== reply.request_id, 'New question reused prior answer key');
+  window.receiveNative({ok:false,completed_action:'answer',bridge_id:nextReply.bridge_id,
+    message:'Fixture: waiting for another answer'}); await tick();
   const remoteTask = {...fixtureTask, id:'ui-telegram-task', source:'telegram', created_at:2};
   window.receiveNative({ok:true,tasks:[fixtureTask,remoteTask],tasks_revision:999999999});
   await tick();

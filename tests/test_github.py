@@ -68,6 +68,69 @@ async def test_terminal_check_failure_after_all_runs_finish():
         await gh.close()
 
 
+@pytest.mark.parametrize("failure_source", ["check", "status"])
+async def test_success_does_not_hide_same_name_failure(failure_source):
+    gh = GitHub("test")
+    checks = [{"name": "test", "status": "completed", "conclusion": "success"}]
+    statuses = []
+    if failure_source == "check":
+        checks.append({"name": "test", "status": "completed", "conclusion": "failure"})
+    else:
+        statuses.append({"context": "test", "state": "failure"})
+    gh.request = AsyncMock(side_effect=[
+        {"check_runs": checks}, {"statuses": statuses}, {"workflow_runs": []},
+    ])
+    try:
+        with pytest.raises(DeliveryError, match="checks failed"):
+            await gh.checks("o/r", "sha", ("test",))
+    finally:
+        await gh.close()
+
+
+async def test_pending_workflow_on_second_page_prevents_delivery():
+    gh = GitHub("test")
+    gh.request = AsyncMock(side_effect=[
+        {"check_runs": [{"name": "test", "status": "completed", "conclusion": "success"}]},
+        {"statuses": []},
+        {"workflow_runs": [{"status": "completed"}] * 100},
+        {"workflow_runs": [{"status": "queued"}]},
+    ])
+    try:
+        assert not await gh.checks("o/r", "sha", ("test",))
+        assert gh.request.call_args.kwargs["params"]["page"] == 2
+    finally:
+        await gh.close()
+
+
+async def test_required_status_on_second_page_is_read():
+    gh = GitHub("test")
+    gh.request = AsyncMock(side_effect=[
+        {"check_runs": []},
+        {"statuses": [{"context": f"other-{i}", "state": "success"} for i in range(100)]},
+        {"statuses": [{"context": "test", "state": "success"}]},
+        {"workflow_runs": []},
+    ])
+    try:
+        assert await gh.checks("o/r", "sha", ("test",))
+    finally:
+        await gh.close()
+
+
+async def test_github_invalid_json_is_an_unconfirmed_read():
+    gh = GitHub("test")
+    await gh.client.aclose()
+    gh.client = httpx.AsyncClient(
+        base_url="https://api.github.com",
+        transport=httpx.MockTransport(lambda request: httpx.Response(200, text="private bad JSON")),
+    )
+    try:
+        with pytest.raises(DeliveryError, match="unconfirmed") as error:
+            await gh.request("GET", "/repos/o/r")
+        assert "private" not in str(error.value)
+    finally:
+        await gh.close()
+
+
 async def test_sdk_timeout_removes_private_credential_directory(tmp_path, monkeypatch):
     from pathlib import Path
 

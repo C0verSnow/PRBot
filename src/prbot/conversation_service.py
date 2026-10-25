@@ -170,25 +170,35 @@ class ConversationService:
         conversation = (
             request_id if source == "desktop" else self.conversation(actor, source, mode)
         )
-        existing = self.request(request_id)
-        if existing:
-            if existing["actor"] != actor or existing["source"] != source:
+        # Reserve the original request before remote I/O. Redis and SQLite must
+        # agree on the winning payload even when retries overlap or a save fails.
+        with self.db() as db:
+            db.execute("BEGIN IMMEDIATE")
+            existing = db.execute("SELECT * FROM requests WHERE id=?", (request_id,)).fetchone()
+            pending = db.execute(
+                "SELECT * FROM pending_submissions WHERE id=?", (request_id,)
+            ).fetchone()
+            owner = existing if existing is not None else pending
+            if owner is not None and (owner["actor"] != actor or owner["source"] != source):
                 raise ConfigError("Request belongs to a different conversation.")
-            return self.public(existing)
-        # Redact user text, not validated routing and trusted filesystem metadata.
-        # A credential matching part of a path must never redirect execution.
-        payload = json.dumps(
-            {
-                "repo": repo,
-                "kind": kind,
-                "number": number,
-                "link": link,
-                "text": self.clean(text.strip()),
-                "workspace_root": str(workspace_directory()),
-                "configuration_file": str(env_path()),
-            }
-        )
-        now = time.time()
+            if existing is not None:
+                return self.public(existing)
+            if pending is None:
+                # Redact text only; credentials matching a path must not redirect work.
+                payload = json.dumps({
+                    "repo": repo, "kind": kind, "number": number, "link": link,
+                    "text": self.clean(text.strip()),
+                    "workspace_root": str(workspace_directory()),
+                    "configuration_file": str(env_path()),
+                })
+                now = time.time()
+                db.execute(
+                    "INSERT INTO pending_submissions VALUES (?,?,?,?,?,?,?)",
+                    (request_id, actor, source, mode, conversation, payload, now),
+                )
+            else:
+                mode, conversation = pending["mode"], pending["conversation"]
+                payload, now = pending["payload"], pending["created"]
         message = {
             "conversation_id": conversation,
             "message_id": request_id + ":user",
@@ -222,6 +232,7 @@ class ConversationService:
                     now,
                 ),
             )
+            db.execute("DELETE FROM pending_submissions WHERE id=?", (request_id,))
         return self.public(self.request(request_id))
 
     def public(self, row):
@@ -249,29 +260,45 @@ class ConversationService:
             "events": events,
         }
 
+    @staticmethod
+    def recent_task_rows(rows):
+        # Never age out a task that still needs Stop, an answer or an archive retry.
+        active = {"queued", "running", "cancelling", "needs_clarification", "save_pending"}
+        ordered = sorted(rows, key=lambda row: row["created"], reverse=True)
+        terminal_count = 0
+        visible = []
+        for row in ordered:
+            if row["status"] not in active:
+                terminal_count += 1
+                if terminal_count > 100:
+                    continue
+            visible.append(row)
+        return visible
+
     def tasks(self, actor, source="desktop"):
         with self.db() as db:
             rows = db.execute(
-                "SELECT * FROM requests WHERE actor=? AND source=? ORDER BY created DESC LIMIT 100",
+                "SELECT * FROM requests WHERE actor=? AND source=? ORDER BY created DESC",
                 (actor, source),
             ).fetchall()
-            return [self.public(row) for row in rows]
+        return [self.public(row) for row in self.recent_task_rows(rows)]
 
     def visible_tasks(self, actor):
         """Read-only Telegram visibility uses server-side bindings, like history."""
         from prbot.telegram_auth import actor_ids
 
         allowed = actor_ids(self.values.get("PRBOT_TELEGRAM_ACTOR_ID", ""))
-        tasks = self.tasks(actor)
         with self.db() as db:
             rows = db.execute(
-                "SELECT * FROM requests WHERE source='telegram' ORDER BY created DESC"
+                "SELECT * FROM requests WHERE (source='desktop' AND actor=?) "
+                "OR source='telegram' ORDER BY created DESC", (actor,)
             ).fetchall()
+        authorized = []
         for row in rows:
             parts = row["actor"].split(":")
-            if len(parts) == 3 and parts[1] in allowed:
-                tasks.append(self.public(row))
-        return sorted(tasks, key=lambda task: task["created_at"], reverse=True)[:100]
+            if row["source"] == "desktop" or (len(parts) == 3 and parts[1] in allowed):
+                authorized.append(row)
+        return [self.public(row) for row in self.recent_task_rows(authorized)]
 
     async def desktop_history(self, actor, mode, cursor="0", count=50, session=""):
         from prbot.telegram_auth import actor_ids
@@ -516,19 +543,33 @@ class ConversationService:
                     execution.cancel()
                     break
                 await asyncio.wait({execution}, timeout=0.1)
-            await asyncio.gather(execution, return_exceptions=True)
+            # Shield prevents a simultaneous window/service shutdown from sending
+            # a second cancellation into the adapter's process cleanup.
+            await asyncio.shield(asyncio.gather(execution, return_exceptions=True))
         finally:
-            if not execution.done():
+            if not execution.done() and not requested:
                 execution.cancel()
+
+            async def settle():
                 await asyncio.gather(execution, return_exceptions=True)
-            # execute() may win the race and notice the durable cancellation
-            # before this watcher. Only now has its adapter finally block exited.
-            if requested or self.request(row["id"])["status"] == "cancelling":
-                self.finish_cancellation(row["id"])
+                # Only now has the adapter finally block actually exited.
+                if requested or self.request(row["id"])["status"] == "cancelling":
+                    self.finish_cancellation(row["id"])
+                    try:
+                        await self.save_result(self.request(row["id"]))
+                    except ConfigError:
+                        pass  # Retain save_pending for the archival loop.
+
+            cleanup = asyncio.create_task(settle())
+            interrupted = False
+            while not cleanup.done():
                 try:
-                    await self.save_result(self.request(row["id"]))
-                except ConfigError:
-                    pass  # save_pending is retried by the normal archival loop.
+                    await asyncio.shield(cleanup)
+                except asyncio.CancelledError:
+                    interrupted = True
+            cleanup.result()
+            if interrupted:
+                raise asyncio.CancelledError
 
     def finish_cancellation(self, task_id):
         with self.db() as db:

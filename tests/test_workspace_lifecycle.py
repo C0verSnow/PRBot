@@ -234,3 +234,130 @@ async def test_native_stop_is_offline_and_cannot_take_telegram_identity(app, mon
     with pytest.raises(ConfigError):
         cancel_desktop_task({"task_id": "workspace-task"}, "local:other")
     loader.assert_not_called()
+
+
+async def test_overlapping_submit_keeps_one_original_payload_and_archive(app):
+    started, release = asyncio.Event(), asyncio.Event()
+    messages = []
+
+    async def save(message):
+        messages.append(message)
+        if len(messages) == 1:
+            started.set()
+            await release.wait()
+
+    app.archive.save.side_effect = save
+    first = asyncio.create_task(app.submit(
+        "overlap-request", "local:me", "desktop", "GitHub", "https://github.com/o/first",
+        "Original request",
+    ))
+    await asyncio.wait_for(started.wait(), 2)
+    other = ConversationService(archive=app.archive, adapter=app.adapter, values={})
+    try:
+        second = await other.submit(
+            "overlap-request", "local:me", "desktop", "GitHub", "https://github.com/o/second",
+            "Changed retry",
+        )
+    finally:
+        release.set()
+        original = await asyncio.wait_for(first, 2)
+    assert original == second
+    assert messages[0] == messages[1]
+    payload = json.loads(app.request("overlap-request")["payload"])
+    assert payload["repo"] == "o/first" and payload["text"] == "Original request"
+
+
+async def test_failed_submit_reservation_survives_restart_and_rejects_other_owner(app):
+    app.archive.save.side_effect = ConfigError("Unavailable")
+    with pytest.raises(ConfigError):
+        await submit(app, "reserved-request")
+    assert app.request("reserved-request") is None
+    reopened = ConversationService(archive=app.archive, adapter=app.adapter, values={})
+    with pytest.raises(ConfigError, match="different conversation"):
+        await reopened.submit(
+            "reserved-request", "local:other", "desktop", "GitHub", "https://github.com/o/r",
+            "Foreign request",
+        )
+    assert app.archive.save.await_count == 1
+    app.archive.save.side_effect = None
+    accepted = await reopened.submit(
+        "reserved-request", "local:me", "desktop", "GitHub", "https://github.com/o/changed",
+        "Changed retry",
+    )
+    assert accepted["user_text"] == "Change the workspace"
+    assert json.loads(reopened.request("reserved-request")["payload"])["repo"] == "o/r"
+    assert app.archive.save.await_args_list[0] == app.archive.save.await_args_list[1]
+
+
+async def test_shutdown_during_stop_cannot_interrupt_adapter_cleanup(app):
+    await submit(app)
+    started, cleanup_started, cleaned = asyncio.Event(), asyncio.Event(), asyncio.Event()
+    release = asyncio.Event()
+
+    async def invoke(*args):
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            cleanup_started.set()
+            await release.wait()
+            cleaned.set()
+
+    app.adapter.invoke.side_effect = invoke
+    app.change("workspace-task", "running")
+    execution = asyncio.create_task(app.execute_cancellable(app.request("workspace-task")))
+    try:
+        await asyncio.wait_for(started.wait(), 2)
+        app.cancel("workspace-task", "local:me")
+        await asyncio.wait_for(cleanup_started.wait(), 2)
+        execution.cancel()
+        # Drain scheduled cancellation callbacks without running real workers.
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+        execution.cancel()
+        await asyncio.sleep(0)
+        assert not execution.done()
+        assert not cleaned.is_set()
+        assert app.request("workspace-task")["status"] == "cancelling"
+    finally:
+        release.set()
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(execution, 2)
+    assert cleaned.is_set()
+    assert app.request("workspace-task")["status"] == "cancelled"
+
+
+async def test_task_lists_preserve_all_actionable_tasks_beyond_history_limit(app):
+    await submit(app)
+    original = app.request("workspace-task")
+    states = ["queued", "running", "cancelling", "needs_clarification", "save_pending"]
+    with app.db() as db:
+        for i, status in enumerate(states):
+            db.execute(
+                "INSERT INTO requests VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                (f"older-{status}", "local:me", "desktop", "Issue", f"older-{status}",
+                 status, original["payload"], None, None, i, i),
+            )
+        for i in range(110):
+            db.execute(
+                "INSERT INTO requests VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                (f"newer-{i}", "local:me", "desktop", "Issue", f"newer-{i}",
+                 "completed", original["payload"], None, None, 1000 + i, 1000 + i),
+            )
+        for actor in ["123:123:0", "456:456:0"]:
+            db.execute(
+                "INSERT INTO requests VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                (f"telegram-{actor}", actor, "telegram", "Issue", "telegram-context",
+                 "running", original["payload"], None, None, 0, 0),
+            )
+    app.values["PRBOT_TELEGRAM_ACTOR_ID"] = "123"
+    own = app.tasks("local:me")
+    visible = app.visible_tasks("local:me")
+    expected = {f"older-{status}" for status in states} | {"workspace-task"}
+    assert expected <= {task["id"] for task in own}
+    assert expected | {"telegram-123:123:0"} <= {task["id"] for task in visible}
+    assert "telegram-456:456:0" not in {task["id"] for task in visible}
+    assert sum(task["status"] == "completed" for task in own) == 100
+    assert sum(task["status"] == "completed" for task in visible) == 100
+    app.values["PRBOT_TELEGRAM_ACTOR_ID"] = ""
+    assert not any(task["source"] == "telegram" for task in app.visible_tasks("local:me"))
