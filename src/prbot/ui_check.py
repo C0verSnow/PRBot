@@ -68,6 +68,10 @@ def schedule_check(web, output):
 window.__uiCheckResult = 'pending';
 (async () => {
   const assert = (value, message) => { if (!value) throw new Error(message); };
+  const root = document.scrollingElement;
+  root.scrollTop = root.scrollHeight;
+  assert(root.scrollTop === 0 && root.scrollHeight <= innerHeight + 1,
+    'Resizing created blank document scroll');
   document.getElementById('user').click();
   await new Promise(resolve => setTimeout(resolve, 80));
   const bounds = document.getElementById('settings').getBoundingClientRect();
@@ -252,7 +256,12 @@ true;
     const root = document.scrollingElement;
     root.scrollTop = root.scrollHeight;
     assert(root.scrollTop === 0 && root.scrollHeight <= innerHeight + 1,
-      `Blank document scroll: top=${root.scrollTop}, height=${root.scrollHeight}`);
+      `Blank document scroll: top=${root.scrollTop}, height=${root.scrollHeight}; ` +
+      JSON.stringify(['html','body','#root','#root > div','main'].map(selector => {
+        const node = document.querySelector(selector), rect = node.getBoundingClientRect();
+        return [selector, rect.top, rect.height, node.scrollHeight,
+          getComputedStyle(node).overflowY, getComputedStyle(node).position];
+      })));
     const main = document.querySelector('main');
     main.scrollTop = main.scrollHeight;
     const tail = main.lastElementChild.getBoundingClientRect().bottom;
@@ -763,6 +772,11 @@ true;
   assert(document.scrollingElement.scrollTop === 0, 'Native wheel escaped into blank document');
   assert(mainScroll.scrollTop <= mainScroll.scrollHeight - mainScroll.clientHeight + 1,
     'Native wheel exceeded actual content');
+  feed.scrollIntoView({block:'center'}); await tick();
+  feed.scrollTop = feed.scrollHeight; await tick();
+  const mainBeforeLogWheel = mainScroll.scrollTop;
+  await wheel(feed, -900);
+  assert(mainScroll.scrollTop === mainBeforeLogWheel, 'Log wheel chained to main scroll');
   checkViewport();
   document.querySelector('main').scrollTop = document.querySelector('main').scrollHeight;
   field('user').focus();
